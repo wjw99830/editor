@@ -1,0 +1,31 @@
+{
+  "name": "editor",
+  "version": "0.0.1",
+  "description": "",
+  "main": "src/main.ts",
+  "module": "dist/editor.esm.js",
+  "umd": "dist/editor.umd.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "rollup -c -w",
+    "build": "rollup -c"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wjw99830/editor.git"
+  },
+  "keywords": [
+    "editor"
+  ],
+  "author": "wjw",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/wjw99830/editor/issues"
+  },
+  "homepage": "https://github.com/wjw99830/editor#readme",
+  "devDependencies": {
+    "rollup": "^1.18.0",
+    "rollup-plugin-typescript2": "^0.22.1",
+    "typescript": "^3.5.3"
+  }
+}
