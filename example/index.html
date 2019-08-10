@@ -5,13 +5,25 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="X-UA-Compatible" content="ie=edge">
   <title>Editor</title>
-  <link rel="stylesheet" href="/dist/editor.css">
+  <link rel="stylesheet" href="./editor.css">
+  <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.9/styles/default.min.css">
+  <style>
+    .hljs {
+      display: inline-block;
+      padding: 0;
+      overflow: visible;
+      background-color: transparent;
+    }
+  </style>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/9.15.9/highlight.min.js"></script>
 </head>
 <body>
   <div id="editor"></div>
   <script src="/dist/editor.umd.js"></script>
   <script>
-    new Editor(document.querySelector('#editor'));
+    new Editor(document.querySelector('#editor')).useDecorator(elm => {
+      hljs.highlightBlock(elm.querySelector('pre'));
+    });
   </script>
 </body>
 </html>

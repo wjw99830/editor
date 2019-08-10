@@ -11,26 +11,60 @@ const h = (tag, props = {}, attrs = {}, text = '') => {
     return elm;
 };
 
-const tail = (arr) => arr[arr.length - 1];
-const safetyHTML = (html) => {
-    return html.replace('>', '&gt;').replace('<', '&lt;').replace(/ /g, '&nbsp;');
+const stack = [];
+const Operation = {
+    DELETE_TEXT: 'deleteText',
+    INSERT_TEXT: 'insertText',
 };
-const microtask = (fn, arg) => Promise.resolve(arg).then(fn);
 
-const snippet = (input) => {
-    return input + (autoCompleteMap[input] || '');
-};
-const autoCompleteMap = {
-    '{': '}',
-    '[': ']',
-    '(': ')',
-    '\'': '\'',
-    '"': '"',
-    '<': '>',
-};
-const autoCompleteKeys = Object.keys(autoCompleteMap);
-const autoCompleteValues = Object.values(autoCompleteMap);
-const autoCompleteEntries = Object.entries(autoCompleteMap).map(([key, value]) => key + value);
+const tail = (arr) => arr[arr.length - 1];
+const microtask = (fn, arg) => Promise.resolve(arg).then(fn);
+const isArray = Array.isArray;
+const isRefType = (o) => o && typeof o === 'object';
+function deepClone(obj) {
+    if (!isRefType(obj)) {
+        return obj;
+    }
+    const copy = isArray(obj) ? [] : {};
+    const stack = [{
+            copy,
+            target: obj,
+        }];
+    const copiedRefs = [];
+    const { set, ownKeys, getOwnPropertyDescriptor } = Reflect;
+    while (stack.length) {
+        const { target, copy } = stack.pop();
+        const keys = ownKeys(target);
+        for (const key of keys) {
+            const desc = getOwnPropertyDescriptor(target, key);
+            if (desc && !desc.enumerable) {
+                continue;
+            }
+            const val = target[key];
+            if (isRefType(val)) {
+                const copied = copiedRefs.find(copied => copied.target === val);
+                if (copied) {
+                    set(copy, key, copied.copy);
+                    continue;
+                }
+                const copyVal = isArray(val) ? [] : {};
+                set(copy, key, copyVal);
+                stack.push({
+                    target: val,
+                    copy: copyVal,
+                });
+            }
+            else {
+                set(copy, key, val);
+            }
+        }
+        copiedRefs.push({
+            target,
+            copy,
+        });
+    }
+    return copy;
+}
 
 let lid = 0;
 class Line {
@@ -39,143 +73,175 @@ class Line {
         this.id = ++lid;
         this.text = '';
         this.focused = false;
-        this.indent = 0;
         this.cursorIndex = 0;
+        this.lineNumber = 0;
+        this.selections = [];
+        this._willUpdate = false;
+        this._focusHandler = (e) => {
+            this.editor.focus(this);
+            const target = e.target;
+            if (target.classList.contains('line--content')) {
+                this.setCursor(Math.round(e.offsetX / this.editor.charWidth));
+            }
+            else {
+                if (e.offsetX <= 30) {
+                    this.setCursor(0);
+                }
+                else {
+                    this.setCursor(this.text.length);
+                }
+            }
+        };
+        this._select = (e) => {
+            if (this.editor.selecting) {
+                const target = e.target;
+                if (target.classList.contains('line--cursor')) {
+                    return;
+                }
+                const alt = e.altKey;
+                const lineNumber = this.lineNumber;
+                const anchorNumber = this.editor.selectionAnchor.lineNumber;
+                const offsetX = target.classList.contains('line--content') ? e.offsetX : e.offsetX - 32;
+                const charWidth = this.editor.charWidth;
+                const focus = Math.round(offsetX / charWidth);
+                const anchor = Math.min(Math.round(this.editor.selectionAnchor.x / charWidth), this.text.length);
+                if (lineNumber < anchorNumber) {
+                    alt ?
+                        this.selections.push([Math.max(focus, 0), this.text.length]) :
+                        (this.selections = [[Math.max(focus, 0), this.text.length]]);
+                }
+                else if (lineNumber === anchorNumber) {
+                    alt ?
+                        this.selections.push([Math.max(0, Math.min(focus, anchor)), Math.min(this.text.length, Math.max(focus, anchor))]) :
+                        (this.selections = [[Math.max(0, Math.min(focus, anchor)), Math.min(this.text.length, Math.max(focus, anchor))]]);
+                }
+                else {
+                    alt ?
+                        this.selections.push([0, Math.min(focus, this.text.length)]) :
+                        (this.selections = [[0, Math.min(focus, this.text.length)]]);
+                }
+                this.update();
+            }
+        };
         this.editorConfig = editor.config;
         this._createElm();
     }
     isEmpty() {
-        return !(this.text.length + this.indent);
+        return !this.text.length;
+    }
+    blur() {
+        this.focused = false;
+        this.update();
+        return this;
     }
     focus() {
         this.focused = true;
         this.update();
         return this;
     }
-    setIndent(indent) {
-        this.indent = indent;
-        this.cursorIndex = this.indent + this.text.length;
-        this.update();
-        return this;
-    }
-    incIndent() {
-        this.indent += 1;
-        this.cursorIndex += 1;
-        this.update();
-        return this;
-    }
-    decIndent() {
-        if (this.indent) {
-            this.indent -= 1;
-            this.cursorIndex -= 1;
-        }
-        this.update();
-        return this;
-    }
-    tabIndent() {
-        this.indent += this.editorConfig.tabSize;
-        this.cursorIndex += this.editorConfig.tabSize;
-        this.update();
-        return this;
-    }
-    decTabIndent() {
-        if (this.indent) {
-            this.indent -= this.editorConfig.tabSize;
-            this.cursorIndex -= this.editorConfig.tabSize;
-        }
-        this.update();
-        return this;
-    }
-    getFullText() {
-        return ' '.repeat(this.indent) + this.text;
+    getIndent() {
+        return (this.text.match(/^ */) || [])[0] || '';
     }
     setText(text) {
         this.text = text;
-        this.cursorIndex = this.indent + this.text.length;
+        this.cursorIndex = text.length;
         this.update();
         return this;
     }
-    backspace() {
-        if (this.cursorIndex <= this.indent) {
-            this.decIndent();
+    insertText(text, startIndex = this.cursorIndex, pushToStack = true) {
+        this.text = this.text.slice(0, startIndex) + text + this.text.slice(startIndex);
+        if (pushToStack) {
+            stack.push({
+                type: Operation.INSERT_TEXT,
+                id: this.id,
+                text: text,
+                startIndex,
+                cursorIndex: this.cursorIndex,
+                selections: deepClone(this.selections),
+            });
         }
-        else {
-            this.decText();
-        }
-        this.update();
-    }
-    decText() {
-        if (this.text.length) {
-            const chars = this.text.split('').filter(Boolean);
-            const shouleDeleteIndex = this.cursorIndex - this.indent - 1;
-            const rightChar = chars[shouleDeleteIndex + 1];
-            const leftChar = chars[shouleDeleteIndex];
-            let deleteCount = autoCompleteMap[leftChar] === rightChar ? 2 : 1;
-            chars.splice(shouleDeleteIndex, deleteCount);
-            this.text = chars.join('');
-            this.cursorIndex -= 1;
-        }
+        this.cursorIndex += text.length;
         this.update();
         return this;
     }
-    appendText(text) {
-        if (!this.text.length) {
-            const spaceStart = text.match(/^ */);
-            if (spaceStart) {
-                this.indent += spaceStart[0].length;
-            }
+    deleteText(startIndex = this.cursorIndex - 1, count = 1, pushToStack = true) {
+        count = Math.max(0, count);
+        const arr = this.text.split('');
+        const deleted = arr.splice(startIndex, count);
+        if (pushToStack) {
+            stack.push({
+                type: Operation.DELETE_TEXT,
+                id: this.id,
+                text: deleted,
+                cursorIndex: this.cursorIndex,
+                startIndex,
+                selections: deepClone(this.selections),
+            });
         }
-        text = this.text.length ? text : text.replace(/^ */g, '');
-        const chars = this.text.split('').filter(Boolean);
-        chars.splice(this.cursorIndex - this.indent, 0, ...text.split('').filter(Boolean));
-        this.text = chars.join('');
-        this.cursorIndex += autoCompleteEntries.includes(text) ? 1 : text.split('').filter(Boolean).length;
+        this.text = arr.join('');
+        this.cursorIndex -= count;
         this.update();
         return this;
     }
     setCursor(index) {
+        index = Math.min(index, this.text.length);
         this.cursorIndex = index;
         this.update();
         return this;
     }
-    moveToMaxCursor() {
-        this.cursorIndex = this.indent + this.text.length;
-        this.update();
-        return this;
-    }
-    getMaxCursor() {
-        return this.indent + this.text.length;
-    }
     update() {
-        const num = this.editor.lines.indexOf(this) + 1;
-        if (this.focused) {
-            this.elm.classList.add('text-line--focused');
+        if (this._willUpdate) {
+            return;
         }
-        else {
-            this.elm.classList.remove('text-line--focused');
-        }
-        this.elm.querySelector('.line-number').textContent = num.toString();
-        this.elm.querySelector('.text-line--content--inner').innerHTML = safetyHTML(' '.repeat(this.indent) + this.text);
-        this.elm.querySelector('.text-line--content--overlay').innerHTML = safetyHTML(' '.repeat(this.cursorIndex));
+        this._willUpdate = true;
+        microtask(() => {
+            const num = this.editor.lines.indexOf(this) + 1;
+            this.lineNumber = num;
+            this.elm.setAttribute('data-line-number', num.toString());
+            if (this.focused) {
+                this.elm.classList.add('line--focused');
+            }
+            else {
+                this.elm.classList.remove('line--focused');
+            }
+            this.elm.querySelector('.line--number').textContent = num.toString();
+            this.elm.querySelector('.line--content').textContent = this.text;
+            this.elm.querySelector('.line--cursor').style.left = this.editor.charWidth * this.cursorIndex + 32 + 'px';
+            const selectionsLength = this.selections.length;
+            const charWidth = this.editor.charWidth;
+            for (const child of [...this.elm.children]) {
+                if (child.classList.contains('line--selected')) {
+                    child.remove();
+                }
+            }
+            for (let i = 0; i < selectionsLength; i++) {
+                const selection = this.selections[i];
+                const selected = h('span', undefined, { class: 'line--selected' });
+                selected.style.left = selection[0] * charWidth + 32 + 'px';
+                selected.style.width = (selection[1] - selection[0]) * charWidth + 'px';
+                this.elm.appendChild(selected);
+            }
+            for (const decorator of this.editor._decorators) {
+                decorator(this.elm);
+            }
+            this._willUpdate = false;
+        });
+    }
+    destroy() {
+        this.elm.removeEventListener('mousedown', this._focusHandler);
     }
     _createElm() {
-        const lineElm = h('div', undefined, { class: 'text-line', id: 'line-' + this.id.toString() });
-        lineElm.addEventListener('mousedown', e => {
-            e.stopPropagation();
-            this.editor.focus(this);
-        });
-        this.elm = lineElm;
-        const contentElm = h('span', undefined, { class: 'text-line--content' });
-        const contentInnerElm = h('span', {
-            innerHTML: safetyHTML(' '.repeat(this.indent) + this.text),
-        }, { class: 'text-line--content--inner' });
-        const contentOverlayElm = h('span', {
-            innerHTML: safetyHTML(' '.repeat(this.cursorIndex)),
-        }, { class: 'text-line--content--overlay' });
-        contentElm.appendChild(contentInnerElm);
-        contentElm.appendChild(contentOverlayElm);
-        lineElm.appendChild(h('span', undefined, { class: 'line-number' }));
-        lineElm.appendChild(contentElm);
+        const line = h('div', undefined, { class: 'line', id: 'line-' + this.id.toString() });
+        const number = h('span', undefined, { class: 'line--number' }, this.editor.lines.indexOf(this) + 1);
+        const content = h('pre', undefined, { class: 'line--content' });
+        const cursor = h('span', undefined, { class: 'line--cursor' });
+        cursor.style.left = '30px';
+        line.appendChild(number);
+        line.appendChild(content);
+        line.appendChild(cursor);
+        line.addEventListener('mousedown', this._focusHandler);
+        line.addEventListener('mousemove', this._select);
+        this.elm = line;
         this.update();
     }
 }
@@ -252,6 +318,21 @@ const KeyCodeMap = {
     222: '\'',
 };
 
+const snippet = (input) => {
+    return input + (autoCompleteMap[input] || '');
+};
+const autoCompleteMap = {
+    '{': '}',
+    '[': ']',
+    '(': ')',
+    '\'': '\'',
+    '"': '"',
+    '<': '>',
+};
+const autoCompleteKeys = Object.keys(autoCompleteMap);
+const autoCompleteValues = Object.values(autoCompleteMap);
+const autoCompleteEntries = Object.entries(autoCompleteMap).map(([key, value]) => key + value);
+
 function upEnter(editor) {
     return () => {
         const focusedLine = editor.findFocusedLine();
@@ -260,7 +341,7 @@ function upEnter(editor) {
             const line = new Line(editor);
             editor.prependLine(focusedLine, line);
             editor.focus(line);
-            line.setIndent(prevLine ? prevLine.indent : 0);
+            line.setText(prevLine ? prevLine.getIndent() : '');
         }
     };
 }
@@ -270,25 +351,25 @@ function downEnter(editor) {
         if (focusedLine) {
             const line = new Line(editor);
             editor.appendLine(focusedLine, line);
-            editor.focus(line);
             if (focusedLine) {
-                let nextIndent = focusedLine.indent;
-                if (autoCompleteKeys.concat(['.']).includes(focusedLine.getFullText()[focusedLine.cursorIndex - 1])) {
+                let nextIndent = focusedLine.getIndent().length;
+                if (autoCompleteKeys.concat(['.']).includes(focusedLine.text[focusedLine.cursorIndex - 1])) {
                     nextIndent += editor.config.tabSize;
                     microtask(handler);
                 }
-                else if (autoCompleteValues.includes(focusedLine.getFullText()[focusedLine.cursorIndex])) {
+                else if (autoCompleteValues.includes(focusedLine.text[focusedLine.cursorIndex])) {
                     nextIndent -= editor.config.tabSize;
                     microtask(editor.focus.bind(editor), focusedLine);
                 }
-                line.setIndent(nextIndent);
-                if (focusedLine.cursorIndex < focusedLine.getMaxCursor()) {
-                    const textWhichMoveToNextLine = focusedLine.text.slice(focusedLine.cursorIndex - focusedLine.indent, focusedLine.getMaxCursor());
-                    focusedLine.setText(focusedLine.text.slice(0, focusedLine.cursorIndex - focusedLine.indent));
-                    line.appendText(textWhichMoveToNextLine);
+                line.setText(' '.repeat(nextIndent));
+                if (focusedLine.cursorIndex < focusedLine.text.length) {
+                    const textWhichMoveToNextLine = focusedLine.text.slice(focusedLine.cursorIndex, focusedLine.text.length);
+                    focusedLine.setText(focusedLine.text.slice(0, focusedLine.cursorIndex));
+                    line.insertText(textWhichMoveToNextLine);
                     line.setCursor(nextIndent);
                 }
             }
+            editor.focus(line);
         }
     };
 }
@@ -304,12 +385,12 @@ function backspace(editor) {
                 }
             }
             else if (focusedLine.cursorIndex > 0) {
-                focusedLine.backspace();
+                focusedLine.deleteText();
             }
             else {
                 const prevLine = editor.findPrevLine(focusedLine);
                 if (prevLine) {
-                    prevLine.appendText(' '.repeat(focusedLine.indent) + focusedLine.text);
+                    prevLine.insertText(focusedLine.text);
                     editor.removeLine(focusedLine);
                     editor.focus(prevLine);
                 }
@@ -328,7 +409,7 @@ function leftMove(editor) {
             else {
                 const prevLine = editor.findPrevLine(focusedLine);
                 if (prevLine) {
-                    focusedLine.moveToMaxCursor();
+                    focusedLine.setCursor(focusedLine.text.length);
                     editor.focus(prevLine);
                 }
             }
@@ -340,13 +421,11 @@ function rightMove(editor) {
         const focusedLine = editor.findFocusedLine();
         if (focusedLine) {
             const cursorIndex = focusedLine.cursorIndex;
-            if (cursorIndex < focusedLine.getMaxCursor()) {
-                focusedLine.setCursor(cursorIndex + 1);
-            }
-            else {
+            focusedLine.setCursor(cursorIndex + 1);
+            if (cursorIndex >= focusedLine.text.length) {
                 const nextLine = editor.findNextLine(focusedLine);
                 if (nextLine) {
-                    focusedLine.moveToMaxCursor();
+                    focusedLine.setCursor(focusedLine.text.length);
                     nextLine.setCursor(0);
                     editor.focus(nextLine);
                 }
@@ -361,13 +440,8 @@ function upMove(editor) {
             const cursorIndex = focusedLine.cursorIndex;
             const prevLine = editor.findPrevLine(focusedLine);
             if (prevLine) {
-                if (prevLine.getMaxCursor() >= cursorIndex) {
-                    prevLine.setCursor(cursorIndex);
-                }
-                else {
-                    prevLine.moveToMaxCursor();
-                }
-                focusedLine.moveToMaxCursor();
+                prevLine.setCursor(cursorIndex);
+                focusedLine.setCursor(focusedLine.text.length);
                 editor.focus(prevLine);
             }
         }
@@ -380,13 +454,8 @@ function downMove(editor) {
             const cursorIndex = focusedLine.cursorIndex;
             const nextLine = editor.findNextLine(focusedLine);
             if (nextLine) {
-                if (nextLine.getMaxCursor() >= cursorIndex) {
-                    nextLine.setCursor(cursorIndex);
-                }
-                else {
-                    nextLine.moveToMaxCursor();
-                }
-                focusedLine.moveToMaxCursor();
+                nextLine.setCursor(cursorIndex);
+                focusedLine.setCursor(focusedLine.text.length);
                 editor.focus(nextLine);
             }
         }
@@ -396,12 +465,7 @@ function tab(editor) {
     return () => {
         const focusedLine = editor.findFocusedLine();
         if (focusedLine) {
-            if (focusedLine.cursorIndex <= focusedLine.indent) {
-                focusedLine.tabIndent();
-            }
-            else {
-                focusedLine.appendText(' '.repeat(editor.config.tabSize));
-            }
+            focusedLine.insertText(' '.repeat(editor.config.tabSize));
         }
     };
 }
@@ -409,12 +473,7 @@ function space(editor) {
     return () => {
         const focusedLine = editor.findFocusedLine();
         if (focusedLine) {
-            if (focusedLine.indent >= focusedLine.cursorIndex) {
-                focusedLine.incIndent();
-            }
-            else {
-                focusedLine.appendText(' ');
-            }
+            focusedLine.insertText(' ');
         }
     };
 }
@@ -422,7 +481,7 @@ function rightIndent(editor) {
     return () => {
         const focusedLine = editor.findFocusedLine();
         if (focusedLine) {
-            focusedLine.tabIndent();
+            focusedLine.insertText(' '.repeat(editor.config.tabSize));
         }
     };
 }
@@ -430,7 +489,7 @@ function leftIndent(editor) {
     return () => {
         const focusedLine = editor.findFocusedLine();
         if (focusedLine) {
-            focusedLine.decTabIndent();
+            focusedLine.deleteText(0, Math.min(focusedLine.getIndent().length, editor.config.tabSize));
         }
     };
 }
@@ -443,10 +502,18 @@ class Editor {
         this.userInput = '';
         this.charWidth = 0;
         this.shortcutsEmitter = new ShortcutsEmitter();
-        this.id = ++eid;
+        this.selecting = false;
+        this.selectionAnchor = {
+            x: 0, y: 0, lineNumber: -1,
+        };
+        this._decorators = new Set();
+        this._id = ++eid;
         config.tabSize = config.tabSize || 2;
         this.config = config;
         this.mount();
+    }
+    useDecorator(decorator) {
+        this._decorators.add(decorator);
     }
     findPrevLine(line) {
         return this.lines[this.lines.indexOf(line) - 1];
@@ -486,9 +553,6 @@ class Editor {
     }
     focus(line) {
         this.currentLine = line;
-        if (line && line.focused) {
-            return;
-        }
         const textarea = this.elm.querySelector('textarea');
         if (textarea) {
             textarea.focus();
@@ -496,8 +560,7 @@ class Editor {
         const l = this.lines.length;
         for (let i = 0; i < l; i++) {
             const line = this.lines[i];
-            line.focused = false;
-            line.update();
+            line.blur();
         }
         if (!line) {
             const lastLine = tail(this.lines);
@@ -537,6 +600,7 @@ class Editor {
         this.currentLine = undefined;
     }
     onInput(e) {
+        // @ts-ignore
         if (e.isComposing) {
             return;
         }
@@ -545,26 +609,107 @@ class Editor {
         target.value = '';
         const focusedLine = this.findFocusedLine();
         if (focusedLine) {
-            const nextChar = focusedLine.getFullText()[focusedLine.cursorIndex];
+            const nextChar = focusedLine.text[focusedLine.cursorIndex];
             if (autoCompleteValues.includes(nextChar) && nextChar === this.userInput) {
                 focusedLine.setCursor(focusedLine.cursorIndex + 1);
             }
             else {
-                focusedLine.appendText(snippet(this.userInput));
+                focusedLine.insertText(snippet(this.userInput));
+                if (autoCompleteKeys.includes(this.userInput)) {
+                    focusedLine.setCursor(focusedLine.cursorIndex - 1);
+                }
             }
         }
     }
-    startSelect() { }
+    startSelect(e) {
+        const line = e.composedPath().find(target => {
+            const elm = target;
+            return elm.classList && elm.classList.contains('line');
+        });
+        if (line) {
+            this.selecting = true;
+            this.selectionAnchor = {
+                x: e.offsetX,
+                y: e.offsetY,
+                lineNumber: Number(line.dataset.lineNumber),
+            };
+        }
+        if (!e.altKey) {
+            const l = this.lines.length;
+            for (let i = 0; i < l; i++) {
+                const element = this.lines[i];
+                if (element.selections.length) {
+                    element.update();
+                }
+                element.selections = [];
+            }
+        }
+    }
+    select(e) {
+        if (this.selecting) {
+            const alt = e.altKey;
+            const target = e.target;
+            const anchor = this.selectionAnchor.lineNumber;
+            const focusLine = e.composedPath().find(target => {
+                const elm = target;
+                return elm.classList && elm.classList.contains('line');
+            });
+            if (focusLine) {
+                const focus = Number(focusLine.dataset.lineNumber);
+                const lineLength = this.lines.length;
+                let offsetX = target.classList.contains('line--content') ? e.offsetX : e.offsetX - 32;
+                if (target.classList.contains('line--cursor')) {
+                    offsetX = 0;
+                }
+                const charWidth = this.charWidth;
+                for (let i = 1; i < lineLength + 1; i++) {
+                    const line = this.lines[i - 1];
+                    if ((i < Math.min(anchor, focus) || i > Math.max(anchor, focus)) && !alt) {
+                        line.selections = [];
+                        line.update();
+                    }
+                    else if (i > Math.min(anchor, focus) && i < Math.max(anchor, focus)) {
+                        line.selections = [[0, line.text.length]];
+                        line.update();
+                    }
+                    else if (i === Math.min(anchor, focus) && focus !== i) {
+                        const anchorIndex = Math.min(Math.round(this.selectionAnchor.x / charWidth), line.text.length);
+                        alt ?
+                            line.selections.push([anchorIndex, line.text.length]) :
+                            (line.selections = [[anchorIndex, line.text.length]]);
+                        line.update();
+                    }
+                    else if (i === Math.max(anchor, focus) && focus !== i) {
+                        const anchorIndex = Math.min(Math.round(this.selectionAnchor.x / charWidth), line.text.length);
+                        alt ?
+                            line.selections.push([0, anchorIndex]) :
+                            (line.selections = [[0, anchorIndex]]);
+                        line.update();
+                    }
+                }
+            }
+        }
+    }
+    endSelect() {
+        this.selecting = false;
+    }
     mount() {
-        const editor = h('div', undefined, { class: 'editor', id: 'editor-' + this.id });
+        const editor = h('div', undefined, { class: 'editor', id: 'editor-' + this._id });
         this._editorElm = editor;
         const linesFragment = document.createDocumentFragment();
         const line = new Line(this);
         this.appendLine(line);
         const textarea = h('textarea');
         editor.appendChild(linesFragment);
-        editor.addEventListener('mousedown', () => this.focus());
+        editor.addEventListener('mousedown', (e) => {
+            const target = e.target;
+            if (target.classList.contains('editor')) {
+                this.focus();
+            }
+        });
         editor.addEventListener('mousedown', this.startSelect.bind(this));
+        editor.addEventListener('mousemove', this.select.bind(this));
+        editor.addEventListener('mouseup', this.endSelect.bind(this));
         editor.addEventListener('keydown', this.onKeyDown.bind(this));
         textarea.addEventListener('blur', this.onBlur.bind(this));
         textarea.addEventListener('input', this.onInput.bind(this));
@@ -594,7 +739,7 @@ class Editor {
         const textNode = document.createTextNode('0');
         range.setStart(textNode, 0);
         range.setEnd(textNode, 1);
-        const editor = $('#editor-' + this.id);
+        const editor = $('#editor-' + this._id);
         if (editor) {
             editor.appendChild(textNode);
             const selection = window.getSelection();

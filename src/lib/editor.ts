@@ -3,7 +3,7 @@ import { EditorConfig, Empty } from "../types";
 import { Line } from "./line";
 import { tail } from "../util";
 import { ShortcutsEmitter, isControlKeyPressed, isTextKey } from "./shortcuts-emitter";
-import { snippet, autoCompleteValues } from "./snippet";
+import { snippet, autoCompleteValues, autoCompleteKeys } from "./snippet";
 import { downEnter, upEnter, rightIndent, leftIndent, backspace, space, leftMove, rightMove, upMove, downMove, tab } from "./shortcuts";
 
 let eid = 0;
@@ -14,11 +14,12 @@ export class Editor {
   public charWidth = 0;
   public shortcutsEmitter = new ShortcutsEmitter();
   public currentLine?: Line;
-  private _id = ++eid;
-  private _selecting = false;
-  private _selectionAnchor = {
-    x: 0, y: 0,
+  public selecting = false;
+  public selectionAnchor = {
+    x: 0, y: 0, lineNumber: -1,
   };
+  public _decorators: Set<Decorator> = new Set();
+  private _id = ++eid;
   private _editorElm!: HTMLElement;
 
   constructor(
@@ -28,6 +29,10 @@ export class Editor {
     config.tabSize = config.tabSize || 2;
     this.config = config as EditorConfig;
     this.mount();
+  }
+
+  useDecorator(decorator: Decorator) {
+    this._decorators.add(decorator);
   }
 
   findPrevLine(line: Line): Line | Empty {
@@ -69,9 +74,6 @@ export class Editor {
   }
   focus(line?: Line) {
     this.currentLine = line;
-    if (line && line.focused) {
-      return;
-    }
     const textarea = this.elm.querySelector('textarea') as HTMLTextAreaElement | null;
     if (textarea) {
       textarea.focus();
@@ -79,8 +81,7 @@ export class Editor {
     const l = this.lines.length;
     for (let i = 0; i < l; i++) {
       const line = this.lines[i];
-      line.focused = false;
-      line.update();
+      line.blur();
     }
     if (!line) {
       const lastLine = tail(this.lines);
@@ -119,7 +120,8 @@ export class Editor {
     }
     this.currentLine = undefined;
   }
-  onInput(e: any) {
+  onInput(e: Event) {
+    // @ts-ignore
     if (e.isComposing) {
       return;
     }
@@ -128,40 +130,86 @@ export class Editor {
     target.value = '';
     const focusedLine = this.findFocusedLine();
     if (focusedLine) {
-      const nextChar = focusedLine.getFullText()[focusedLine.cursorIndex];
+      const nextChar = focusedLine.text[focusedLine.cursorIndex];
       if (autoCompleteValues.includes(nextChar) && nextChar === this.userInput) {
         focusedLine.setCursor(focusedLine.cursorIndex + 1);
       } else {
-        focusedLine.appendText(snippet(this.userInput));
+        focusedLine.insertText(snippet(this.userInput));
+        if (autoCompleteKeys.includes(this.userInput)) {
+          focusedLine.setCursor(focusedLine.cursorIndex - 1);
+        }
       }
     }
   }
   startSelect(e: MouseEvent) {
-    this._selecting = true;
-    this._selectionAnchor = {
-      x: e.clientX,
-      y: e.clientY,
-    };
+    const line = e.composedPath().find(target => {
+      const elm = target as HTMLElement;
+      return elm.classList && elm.classList.contains('line');
+    }) as HTMLElement | Empty;
+    if (line) {
+      this.selecting = true;
+      this.selectionAnchor = {
+        x: e.offsetX,
+        y: e.offsetY,
+        lineNumber: Number(line.dataset.lineNumber),
+      };
+    }
+    if (!e.altKey) {
+      const l = this.lines.length;
+      for (let i = 0; i < l; i++) {
+        const element = this.lines[i];
+        if (element.selections.length) {
+          element.update();
+        }
+        element.selections = [];
+      }
+    }
   }
   select(e: MouseEvent) {
-    if (this._selecting) {
-      let targetLine: HTMLElement;
-      const dx = e.clientX - this._selectionAnchor.x;
-      const dy = e.clientY - this._selectionAnchor.y;
-      if (dx <= 0 && dy > 0) {
-        targetLine = e.target as HTMLElement;
-        let line = e.composedPath().find(target => {
-          const elm = target as HTMLElement;
-          return elm.classList && elm.classList.contains('text-line');
-        }) as HTMLElement | Empty;
-        if (line) {
-          targetLine = line;
+    if (this.selecting) {
+      const alt = e.altKey;
+      const target = e.target as HTMLElement;
+      const anchor = this.selectionAnchor.lineNumber;
+      const focusLine = e.composedPath().find(target => {
+        const elm = target as HTMLElement;
+        return elm.classList && elm.classList.contains('line');
+      }) as HTMLElement | Empty;
+      if (focusLine) {
+        const focus = Number(focusLine.dataset.lineNumber);
+        const lineLength = this.lines.length;
+        let offsetX = target.classList.contains('line--content') ? e.offsetX : e.offsetX - 32;
+        if (target.classList.contains('line--cursor')) {
+          offsetX = 0;
+        }
+        const charWidth = this.charWidth;
+        const focusIndex = Math.round(offsetX / charWidth);
+        for (let i = 1; i < lineLength + 1; i++) {
+          const line = this.lines[i - 1];
+          if ((i < Math.min(anchor, focus) || i > Math.max(anchor, focus)) && !alt) {
+            line.selections = [];
+            line.update();
+          } else if (i > Math.min(anchor, focus) && i < Math.max(anchor, focus)) {
+            line.selections = [[0, line.text.length]];
+            line.update();
+          } else if (i === Math.min(anchor, focus) && focus !== i) {
+            const anchorIndex = Math.min(Math.round(this.selectionAnchor.x / charWidth), line.text.length);
+            alt ?
+              line.selections.push([anchorIndex, line.text.length]) :
+              (line.selections = [[anchorIndex, line.text.length]])
+            line.update();
+          } else if (i === Math.max(anchor, focus) && focus !== i) {
+            const anchorIndex = Math.min(Math.round(this.selectionAnchor.x / charWidth), line.text.length);
+            alt ?
+              line.selections.push([0, anchorIndex]) :
+              (line.selections = [[0, anchorIndex]])
+            line.update();
+          }
         }
       }
     }
   }
   endSelect() {
-    this._selecting = false;
+    this.selecting = false;
   }
 
   mount() {
@@ -172,7 +220,12 @@ export class Editor {
     this.appendLine(line);
     const textarea = h('textarea');
     editor.appendChild(linesFragment);
-    editor.addEventListener('mousedown', () => this.focus());
+    editor.addEventListener('mousedown', (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.classList.contains('editor')) {
+        this.focus();
+      }
+    });
     editor.addEventListener('mousedown', this.startSelect.bind(this));
     editor.addEventListener('mousemove', this.select.bind(this));
     editor.addEventListener('mouseup', this.endSelect.bind(this));
@@ -221,3 +274,4 @@ export class Editor {
     }
   }
 }
+type Decorator = (line: HTMLElement) => any;

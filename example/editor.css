@@ -6,6 +6,7 @@
   min-height: 300px;
   cursor: text;
   font-family: SFMono-Regular,Consolas,Liberation Mono,Menlo,Courier,monospace;
+  font-size: 14px;
 }
 .editor + textarea {
   background-color: transparent;
@@ -15,60 +16,73 @@
   position: absolute;
   z-index: -1;
 }
-.text-line {
+.line {
   --line-height: 20px;
   height: var(--line-height);
   line-height: var(--line-height);
   background-color: transparent;
-  font-size: 14px;
   position: relative;
   padding-left: 32px;
   min-width: 100%;
   display: inline-block;
 }
-.line-number {
+.line--number {
+  width: 30px;
+  cursor: default;
+  background-color: #dadbdc;
   position: absolute;
   top: 0;
   left: 0;
-  height: var(--line-height);
   line-height: var(--line-height);
   text-align: center;
-  width: 30px;
 }
-.text-line--content {
-  vertical-align: middle;
+.line--content {
+  font-family: SFMono-Regular,Consolas,Liberation Mono,Menlo,Courier,monospace;
   display: inline-block;
-  height: var(--line-height);
-  line-height: var(--line-height);
   position: relative;
+  z-index: 2;
+  margin: 0;
+  line-height: var(--line-height);
+  vertical-align: middle;
 }
-.text-line--content--overlay {
+.line--cursor {
+  display: none;
   position: absolute;
   top: 0;
   left: 0;
-  height: var(--line-height);
+  z-index: 3;
+  line-height: var(--line-height);
+}
+.line--selected {
   display: inline-block;
+  vertical-align: middle;
+  height: var(--line-height);
+  position: absolute;
+  top: 0;
+  left: 0;
+  background-color: rgba(0, 0, 0, .1);
 }
 
-.text-line::after {
+.line::after {
   content: '';
   width: 0;
   height: 100%;
   vertical-align: middle;
   display: inline-block;
 }
-.text-line--focused {
-  background-color: rgba(230, 230, 230, .7);
+.line--focused {
+  background-color: rgba(230, 230, 230, .5);
 }
-.text-line--focused .text-line--content--overlay::after {
+.line--focused .line--cursor {
+  display: inline-block;
+  position: absolute;
   content: '';
   width: 2px;
-  position: absolute;
   height: var(--line-height);
-  display: inline-block;
   background-color: #0ae;
   animation: focus 1s infinite;
   margin-left: 1px;
+  vertical-align: middle;
 }
 @keyframes focus {
   0% {

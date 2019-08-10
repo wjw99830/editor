@@ -11,7 +11,7 @@ export function upEnter(editor: Editor) {
       const line = new Line(editor);
       editor.prependLine(focusedLine, line);
       editor.focus(line);
-      line.setIndent(prevLine ? prevLine.indent : 0);
+      line.setText(prevLine ? prevLine.getIndent() : '');
     }
   };
 }
@@ -21,24 +21,24 @@ export function downEnter(editor: Editor) {
     if (focusedLine) {
       const line = new Line(editor);
       editor.appendLine(focusedLine, line);
-      editor.focus(line);
       if (focusedLine) {
-        let nextIndent = focusedLine.indent;
-        if (autoCompleteKeys.concat(['.']).includes(focusedLine.getFullText()[focusedLine.cursorIndex - 1])) {
+        let nextIndent = focusedLine.getIndent().length;
+        if (autoCompleteKeys.concat(['.']).includes(focusedLine.text[focusedLine.cursorIndex - 1])) {
           nextIndent += editor.config.tabSize;
           microtask(handler);
-        } else if (autoCompleteValues.includes(focusedLine.getFullText()[focusedLine.cursorIndex])) {
+        } else if (autoCompleteValues.includes(focusedLine.text[focusedLine.cursorIndex])) {
           nextIndent -= editor.config.tabSize;
           microtask(editor.focus.bind(editor), focusedLine);
         }
-        line.setIndent(nextIndent);
-        if (focusedLine.cursorIndex < focusedLine.getMaxCursor()) {
-          const textWhichMoveToNextLine = focusedLine.text.slice(focusedLine.cursorIndex - focusedLine.indent, focusedLine.getMaxCursor());
-          focusedLine.setText(focusedLine.text.slice(0, focusedLine.cursorIndex - focusedLine.indent));
-          line.appendText(textWhichMoveToNextLine);
+        line.setText(' '.repeat(nextIndent));
+        if (focusedLine.cursorIndex < focusedLine.text.length) {
+          const textWhichMoveToNextLine = focusedLine.text.slice(focusedLine.cursorIndex, focusedLine.text.length);
+          focusedLine.setText(focusedLine.text.slice(0, focusedLine.cursorIndex));
+          line.insertText(textWhichMoveToNextLine);
           line.setCursor(nextIndent);
         }
       }
+      editor.focus(line);
     }
   };
 }
@@ -53,11 +53,11 @@ export function backspace(editor: Editor) {
           editor.focus(prevLine);
         }
       } else if (focusedLine.cursorIndex > 0) {
-        focusedLine.backspace();
+        focusedLine.deleteText();
       } else {
         const prevLine = editor.findPrevLine(focusedLine);
         if (prevLine) {
-          prevLine.appendText(' '.repeat(focusedLine.indent) + focusedLine.text);
+          prevLine.insertText(focusedLine.text);
           editor.removeLine(focusedLine);
           editor.focus(prevLine);
         }
@@ -75,7 +75,7 @@ export function leftMove(editor: Editor) {
       } else {
         const prevLine = editor.findPrevLine(focusedLine);
         if (prevLine) {
-          focusedLine.moveToMaxCursor();
+          focusedLine.setCursor(focusedLine.text.length);
           editor.focus(prevLine);
         }
       }
@@ -87,12 +87,11 @@ export function rightMove(editor: Editor) {
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
       const cursorIndex = focusedLine.cursorIndex;
-      if (cursorIndex < focusedLine.getMaxCursor()) {
-        focusedLine.setCursor(cursorIndex + 1);
-      } else {
+      focusedLine.setCursor(cursorIndex + 1);
+      if (cursorIndex >= focusedLine.text.length) {
         const nextLine = editor.findNextLine(focusedLine);
         if (nextLine) {
-          focusedLine.moveToMaxCursor();
+          focusedLine.setCursor(focusedLine.text.length);
           nextLine.setCursor(0);
           editor.focus(nextLine);
         }
@@ -107,12 +106,8 @@ export function upMove(editor: Editor) {
       const cursorIndex = focusedLine.cursorIndex;
       const prevLine = editor.findPrevLine(focusedLine);
       if (prevLine) {
-        if (prevLine.getMaxCursor() >= cursorIndex) {
-          prevLine.setCursor(cursorIndex);
-        } else {
-          prevLine.moveToMaxCursor();
-        }
-        focusedLine.moveToMaxCursor();
+        prevLine.setCursor(cursorIndex);
+        focusedLine.setCursor(focusedLine.text.length);
         editor.focus(prevLine);
       }
     }
@@ -125,12 +120,8 @@ export function downMove(editor: Editor) {
       const cursorIndex = focusedLine.cursorIndex;
       const nextLine = editor.findNextLine(focusedLine);
       if (nextLine) {
-        if (nextLine.getMaxCursor() >= cursorIndex) {
-          nextLine.setCursor(cursorIndex);
-        } else {
-          nextLine.moveToMaxCursor();
-        }
-        focusedLine.moveToMaxCursor();
+        nextLine.setCursor(cursorIndex);
+        focusedLine.setCursor(focusedLine.text.length);
         editor.focus(nextLine);
       }
     }
@@ -140,11 +131,7 @@ export function tab(editor: Editor) {
   return () => {
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
-      if (focusedLine.cursorIndex <= focusedLine.indent) {
-        focusedLine.tabIndent();
-      } else {
-        focusedLine.appendText(' '.repeat(editor.config.tabSize));
-      }
+      focusedLine.insertText(' '.repeat(editor.config.tabSize));
     }
   };
 }
@@ -152,11 +139,7 @@ export function space(editor: Editor) {
   return () => {
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
-      if (focusedLine.indent >= focusedLine.cursorIndex) {
-        focusedLine.incIndent();
-      } else {
-        focusedLine.appendText(' ');
-      }
+      focusedLine.insertText(' ');
     }
   };
 }
@@ -164,7 +147,7 @@ export function rightIndent(editor: Editor) {
   return () => {
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
-      focusedLine.tabIndent();
+      focusedLine.insertText(' '.repeat(editor.config.tabSize));
     }
   }
 }
@@ -172,7 +155,7 @@ export function leftIndent(editor: Editor) {
   return () => {
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
-      focusedLine.decTabIndent();
+      focusedLine.deleteText(0, Math.min(focusedLine.getIndent().length, editor.config.tabSize));
     }
   }
 }
