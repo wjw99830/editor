@@ -21,9 +21,17 @@
   <div id="editor"></div>
   <script src="/dist/editor.umd.js"></script>
   <script>
-    new Editor(document.querySelector('#editor')).useDecorator(elm => {
-      hljs.highlightBlock(elm.querySelector('pre'));
-    });
+    // for (let i = 0; i < 10000; i++) {
+      const editor = new Editor(document.querySelector('#editor')).useDecorator(elm => {
+        hljs.highlightBlock(elm.querySelector('pre'));
+      });
+      editor.on('save', console.log);
+      editor.deserialize(`
+const add = (a, b) => a + b;
+console.log(add(1, 2));
+`);
+      // editor.dispose();
+    // }
   </script>
 </body>
 </html>

@@ -1,8 +1,10 @@
 import { EditorConfig } from "../types";
 import { Editor } from "./editor";
 import { h } from "../dom";
-import { stack, Operation } from "./stack";
-import { microtask, deepClone } from "../util";
+import { stack, Operation, pushOperation } from "./stack";
+import { microtask, deepClone, tail } from "../util";
+
+const { min, max, round, abs } = Math;
 
 let lid = 0;
 export class Line {
@@ -31,9 +33,41 @@ export class Line {
     this.update();
     return this;
   }
-  focus() {
+  focus(e?: MouseEvent) {
     this.focused = true;
+    e && this._focusHandler(e);
     this.update();
+    return this;
+  }
+  setSelections(selections: Selection[]) {
+    const ptrs = selections.flat().sort((a, b) => a - b).filter(ptr => ptr <= this.text.length);
+    this.selections = [];
+    const l = ptrs.length;
+    for (let i = 0; i < l; i++) {
+      const ptr = ptrs[i];
+      if (i % 2) {
+        const selection = tail(this.selections);
+        if (selection) {
+          selection[1] = ptr;
+        }
+      } else {
+        this.selections.push([ptr, 0]);
+      }
+    }
+    this.update();
+    return this;
+  }
+  setSelectionFromAnchor(anchor: number, focus: number) {
+    const selection = this.selections.find(selection => selection[0] === anchor);
+    if (selection) {
+      selection[1] = focus;
+      this.setSelections(this.selections);
+      return true;
+    }
+    return false;
+  }
+  pushSelection(selection: Selection) {
+    this.setSelections([...this.selections, selection]);
     return this;
   }
   getIndent() {
@@ -48,8 +82,8 @@ export class Line {
   insertText(text: string, startIndex = this.cursorIndex, pushToStack = true) {
     this.text = this.text.slice(0, startIndex) + text + this.text.slice(startIndex);
     if (pushToStack) {
-      stack.push({
-        type:  Operation.INSERT_TEXT,
+      this.editor._stack.push({
+        type: Operation.INSERT_TEXT,
         id: this.id,
         text: text,
         startIndex,
@@ -61,27 +95,28 @@ export class Line {
     this.update();
     return this;
   }
-  deleteText(startIndex = this.cursorIndex - 1, count = 1, pushToStack = true) {
-    count = Math.max(0, count);
+  deleteText(startIndex = this.cursorIndex, endIndex = this.cursorIndex - 1, pushToStack = true) {
     const arr = this.text.split('');
-    const deleted = arr.splice(startIndex, count);
+    const deleted = arr.splice(min(startIndex, endIndex), abs(startIndex - endIndex));
     if (pushToStack) {
-      stack.push({
+      this.editor._stack.push({
         type: Operation.DELETE_TEXT,
         id: this.id,
-        text: deleted,
+        text: deleted.join(''),
         cursorIndex: this.cursorIndex,
-        startIndex,
+        startIndex: min(startIndex, endIndex),
         selections: deepClone(this.selections),
       });
     }
     this.text = arr.join('');
-    this.cursorIndex -= count;
+    if (startIndex > endIndex) {
+      this.cursorIndex -= startIndex - endIndex;
+    }
     this.update();
     return this;
   }
   setCursor(index: number) {
-    index = Math.min(index, this.text.length);
+    index = max(0, min(index, this.text.length));
     this.cursorIndex = index;
     this.update();
     return this;
@@ -123,21 +158,16 @@ export class Line {
       this._willUpdate = false;
     });
   }
-  destroy() {
+  dispose() {
     this.elm.removeEventListener('mousedown', this._focusHandler);
+    this.elm.removeEventListener('mousemove', this._select);
+    this.elm.remove();
   }
   private _focusHandler = (e: MouseEvent) => {
     this.editor.focus(this);
-    const target = e.target as HTMLElement;
-    if (target.classList.contains('line--content')) {
-      this.setCursor(Math.round(e.offsetX / this.editor.charWidth));
-    } else {
-      if (e.offsetX <= 30) {
-        this.setCursor(0);
-      } else {
-        this.setCursor(this.text.length);
-      }
-    }
+    const originX = this.elm.getBoundingClientRect().left + 32;
+    const cursorIndex = round((e.clientX - originX) / this.editor.charWidth);
+    this.setCursor(cursorIndex);
   }
   private _select = (e: MouseEvent) => {
     if (this.editor.selecting) {
@@ -148,24 +178,23 @@ export class Line {
       const alt = e.altKey;
       const lineNumber = this.lineNumber;
       const anchorNumber = this.editor.selectionAnchor.lineNumber;
-      const offsetX = target.classList.contains('line--content') ? e.offsetX : e.offsetX - 32;
       const charWidth = this.editor.charWidth;
-      const focus = Math.round(offsetX / charWidth);
-      const anchor = Math.min(Math.round(this.editor.selectionAnchor.x / charWidth), this.text.length);
-      if (lineNumber < anchorNumber) {
+      const originX = this.elm.getBoundingClientRect().left + 32;
+      const focus = round((e.clientX - originX) / charWidth);
+      const anchor = min(round((this.editor.selectionAnchor.x - originX) / charWidth), this.text.length);
+      if (lineNumber < anchorNumber && !this.setSelectionFromAnchor(max(focus, 0), this.text.length)) {
         alt ?
-        this.selections.push([Math.max(focus, 0), this.text.length]) :
-        (this.selections = [[Math.max(focus, 0), this.text.length]])
-      } else if (lineNumber === anchorNumber) {
+          this.pushSelection([max(focus, 0), this.text.length]) :
+          this.setSelections([[max(focus, 0), this.text.length]])
+      } else if (lineNumber === anchorNumber && !this.setSelectionFromAnchor(max(0, min(focus, anchor)), min(this.text.length, max(focus, anchor)))) {
         alt ?
-          this.selections.push([Math.max(0, Math.min(focus, anchor)), Math.min(this.text.length, Math.max(focus, anchor))]) :
-          (this.selections = [[Math.max(0, Math.min(focus, anchor)), Math.min(this.text.length, Math.max(focus, anchor))]])
-      } else {
+          this.pushSelection([max(0, min(focus, anchor)), min(this.text.length, max(focus, anchor))]) :
+          this.setSelections([[max(0, min(focus, anchor)), min(this.text.length, max(focus, anchor))]])
+      } else if (lineNumber > anchorNumber && !this.setSelectionFromAnchor(0, min(focus, this.text.length))) {
         alt ?
-          this.selections.push([0, Math.min(focus, this.text.length)]) :
-          (this.selections = [[0, Math.min(focus, this.text.length)]])
+          this.pushSelection([0, min(focus, this.text.length)]) :
+          this.setSelections([[0, min(focus, this.text.length)]])
       }
-      this.update();
     }
   }
   private _createElm() {

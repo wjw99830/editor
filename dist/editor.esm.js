@@ -10,12 +10,58 @@ const h = (tag, props = {}, attrs = {}, text = '') => {
     elm.textContent = text.toString();
     return elm;
 };
+function writeClipboard(text) {
+    const clipboard = h('textarea', { value: text }, { readonly: '', class: 'editor--clipboard' });
+    document.body.appendChild(clipboard);
+    clipboard.select();
+    document.execCommand('copy');
+    clipboard.remove();
+}
 
-const stack = [];
 const Operation = {
     DELETE_TEXT: 'deleteText',
     INSERT_TEXT: 'insertText',
 };
+class Stack {
+    constructor(_editor) {
+        this._editor = _editor;
+        this._innerStack = [];
+        this.ptr = -1;
+        this.undo = () => {
+            const opt = this._innerStack[this.ptr];
+            if (opt) {
+                switch (opt.type) {
+                    case Operation.INSERT_TEXT: {
+                        const line = this._editor.lines.find(line => line.id === opt.id);
+                        if (line) {
+                            line.deleteText(opt.startIndex, opt.startIndex + opt.text.length, false);
+                            line.setCursor(opt.cursorIndex);
+                            line.setSelections(opt.selections);
+                        }
+                        this.ptr--;
+                        break;
+                    }
+                    case Operation.DELETE_TEXT: {
+                        const line = this._editor.lines.find(line => line.id === opt.id);
+                        if (line) {
+                            line.insertText(opt.text, opt.startIndex, false);
+                            line.setCursor(opt.cursorIndex);
+                            line.setSelections(opt.selections);
+                        }
+                        this.ptr--;
+                        break;
+                    }
+                    default: break;
+                }
+            }
+        };
+    }
+    push(opt) {
+        this._innerStack.push(opt);
+        this.ptr = this._innerStack.length - 1;
+    }
+    redo() { }
+}
 
 const tail = (arr) => arr[arr.length - 1];
 const microtask = (fn, arg) => Promise.resolve(arg).then(fn);
@@ -66,6 +112,7 @@ function deepClone(obj) {
     return copy;
 }
 
+const { min, max, round, abs } = Math;
 let lid = 0;
 class Line {
     constructor(editor) {
@@ -79,18 +126,9 @@ class Line {
         this._willUpdate = false;
         this._focusHandler = (e) => {
             this.editor.focus(this);
-            const target = e.target;
-            if (target.classList.contains('line--content')) {
-                this.setCursor(Math.round(e.offsetX / this.editor.charWidth));
-            }
-            else {
-                if (e.offsetX <= 30) {
-                    this.setCursor(0);
-                }
-                else {
-                    this.setCursor(this.text.length);
-                }
-            }
+            const originX = this.elm.getBoundingClientRect().left + 32;
+            const cursorIndex = round((e.clientX - originX) / this.editor.charWidth);
+            this.setCursor(cursorIndex);
         };
         this._select = (e) => {
             if (this.editor.selecting) {
@@ -101,26 +139,25 @@ class Line {
                 const alt = e.altKey;
                 const lineNumber = this.lineNumber;
                 const anchorNumber = this.editor.selectionAnchor.lineNumber;
-                const offsetX = target.classList.contains('line--content') ? e.offsetX : e.offsetX - 32;
                 const charWidth = this.editor.charWidth;
-                const focus = Math.round(offsetX / charWidth);
-                const anchor = Math.min(Math.round(this.editor.selectionAnchor.x / charWidth), this.text.length);
-                if (lineNumber < anchorNumber) {
+                const originX = this.elm.getBoundingClientRect().left + 32;
+                const focus = round((e.clientX - originX) / charWidth);
+                const anchor = min(round((this.editor.selectionAnchor.x - originX) / charWidth), this.text.length);
+                if (lineNumber < anchorNumber && !this.setSelectionFromAnchor(max(focus, 0), this.text.length)) {
                     alt ?
-                        this.selections.push([Math.max(focus, 0), this.text.length]) :
-                        (this.selections = [[Math.max(focus, 0), this.text.length]]);
+                        this.pushSelection([max(focus, 0), this.text.length]) :
+                        this.setSelections([[max(focus, 0), this.text.length]]);
                 }
-                else if (lineNumber === anchorNumber) {
+                else if (lineNumber === anchorNumber && !this.setSelectionFromAnchor(max(0, min(focus, anchor)), min(this.text.length, max(focus, anchor)))) {
                     alt ?
-                        this.selections.push([Math.max(0, Math.min(focus, anchor)), Math.min(this.text.length, Math.max(focus, anchor))]) :
-                        (this.selections = [[Math.max(0, Math.min(focus, anchor)), Math.min(this.text.length, Math.max(focus, anchor))]]);
+                        this.pushSelection([max(0, min(focus, anchor)), min(this.text.length, max(focus, anchor))]) :
+                        this.setSelections([[max(0, min(focus, anchor)), min(this.text.length, max(focus, anchor))]]);
                 }
-                else {
+                else if (lineNumber > anchorNumber && !this.setSelectionFromAnchor(0, min(focus, this.text.length))) {
                     alt ?
-                        this.selections.push([0, Math.min(focus, this.text.length)]) :
-                        (this.selections = [[0, Math.min(focus, this.text.length)]]);
+                        this.pushSelection([0, min(focus, this.text.length)]) :
+                        this.setSelections([[0, min(focus, this.text.length)]]);
                 }
-                this.update();
             }
         };
         this.editorConfig = editor.config;
@@ -134,9 +171,42 @@ class Line {
         this.update();
         return this;
     }
-    focus() {
+    focus(e) {
         this.focused = true;
+        e && this._focusHandler(e);
         this.update();
+        return this;
+    }
+    setSelections(selections) {
+        const ptrs = selections.flat().sort((a, b) => a - b).filter(ptr => ptr <= this.text.length);
+        this.selections = [];
+        const l = ptrs.length;
+        for (let i = 0; i < l; i++) {
+            const ptr = ptrs[i];
+            if (i % 2) {
+                const selection = tail(this.selections);
+                if (selection) {
+                    selection[1] = ptr;
+                }
+            }
+            else {
+                this.selections.push([ptr, 0]);
+            }
+        }
+        this.update();
+        return this;
+    }
+    setSelectionFromAnchor(anchor, focus) {
+        const selection = this.selections.find(selection => selection[0] === anchor);
+        if (selection) {
+            selection[1] = focus;
+            this.setSelections(this.selections);
+            return true;
+        }
+        return false;
+    }
+    pushSelection(selection) {
+        this.setSelections([...this.selections, selection]);
         return this;
     }
     getIndent() {
@@ -151,7 +221,7 @@ class Line {
     insertText(text, startIndex = this.cursorIndex, pushToStack = true) {
         this.text = this.text.slice(0, startIndex) + text + this.text.slice(startIndex);
         if (pushToStack) {
-            stack.push({
+            this.editor._stack.push({
                 type: Operation.INSERT_TEXT,
                 id: this.id,
                 text: text,
@@ -164,27 +234,28 @@ class Line {
         this.update();
         return this;
     }
-    deleteText(startIndex = this.cursorIndex - 1, count = 1, pushToStack = true) {
-        count = Math.max(0, count);
+    deleteText(startIndex = this.cursorIndex, endIndex = this.cursorIndex - 1, pushToStack = true) {
         const arr = this.text.split('');
-        const deleted = arr.splice(startIndex, count);
+        const deleted = arr.splice(min(startIndex, endIndex), abs(startIndex - endIndex));
         if (pushToStack) {
-            stack.push({
+            this.editor._stack.push({
                 type: Operation.DELETE_TEXT,
                 id: this.id,
-                text: deleted,
+                text: deleted.join(''),
                 cursorIndex: this.cursorIndex,
-                startIndex,
+                startIndex: min(startIndex, endIndex),
                 selections: deepClone(this.selections),
             });
         }
         this.text = arr.join('');
-        this.cursorIndex -= count;
+        if (startIndex > endIndex) {
+            this.cursorIndex -= startIndex - endIndex;
+        }
         this.update();
         return this;
     }
     setCursor(index) {
-        index = Math.min(index, this.text.length);
+        index = max(0, min(index, this.text.length));
         this.cursorIndex = index;
         this.update();
         return this;
@@ -227,8 +298,10 @@ class Line {
             this._willUpdate = false;
         });
     }
-    destroy() {
+    dispose() {
         this.elm.removeEventListener('mousedown', this._focusHandler);
+        this.elm.removeEventListener('mousemove', this._select);
+        this.elm.remove();
     }
     _createElm() {
         const line = h('div', undefined, { class: 'line', id: 'line-' + this.id.toString() });
@@ -246,44 +319,70 @@ class Line {
     }
 }
 
-class ShortcutsEmitter {
+class EventEmitter {
     constructor() {
-        this.shortcuts = new Map();
+        this._listeners = {};
     }
-    emit(e) {
-        const alt = e.altKey ? 'alt' : '';
-        const ctrl = e.ctrlKey ? 'ctrl' : '';
-        const shift = e.shiftKey ? 'shift' : '';
-        const key = isTextKey(e.keyCode) ? (KeyCodeMap[e.keyCode] || e.key.toLowerCase()) : (isControlKey(e.key) ? '' : e.code.toLowerCase());
-        const combined = [ctrl, shift, alt, key].filter(Boolean).join('+');
-        const handlers = this.shortcuts.get(combined);
-        if (!e.key.startsWith('F')) {
-            e.preventDefault();
+    on(event, handler) {
+        if (this._listeners[event]) {
+            this._listeners[event].add(handler);
         }
-        if (handlers) {
-            for (const handler of handlers) {
-                handler();
+        else {
+            this._listeners[event] = new Set().add(handler);
+        }
+        return this;
+    }
+    once(event, handler) {
+        const wrapper = () => {
+            handler.call(undefined, ...arguments);
+            this.off(event, wrapper);
+        };
+        this.on(event, wrapper);
+        return this;
+    }
+    off(event, handler) {
+        for (const [name, handlers] of Object.entries(this._listeners)) {
+            if (name === event) {
+                if (handler) {
+                    handlers.delete(handler);
+                }
+                else {
+                    delete this._listeners[name];
+                }
             }
         }
+        return this;
+    }
+    emit(event, ...args) {
+        for (const [name, handlers] of Object.entries(this._listeners)) {
+            if (name === event) {
+                for (const handler of handlers) {
+                    handler(...args);
+                }
+                break;
+            }
+        }
+        return this;
+    }
+}
+
+class ShortcutsEmitter extends EventEmitter {
+    static sort(shortcuts) {
+        const keys = shortcuts.split('+');
+        const alt = keys.includes('alt');
+        const ctrl = keys.includes('ctrl');
+        const shift = keys.includes('shift');
+        return [ctrl && 'ctrl', shift && 'shift', alt && 'alt', keys.find(key => !['ctrl', 'shift', 'alt'].includes(key))].filter(Boolean).join('+');
     }
     on(shortcuts, handler) {
         shortcuts = shortcuts.split('+').map(key => key.toLowerCase().trim()).join('+');
-        let handlers = this.shortcuts.get(shortcuts);
-        if (handlers) {
-            handlers.add(handler);
-        }
-        else {
-            handlers = new Set();
-            handlers.add(handler);
-            this.shortcuts.set(shortcuts, handlers);
-        }
+        super.on(ShortcutsEmitter.sort(shortcuts), handler);
+        return this;
     }
     off(shortcuts, handler) {
         shortcuts = shortcuts.split('+').map(key => key.toLowerCase().trim()).join('+');
-        const handlers = this.shortcuts.get(shortcuts);
-        if (handlers) {
-            handlers.delete(handler);
-        }
+        this.off(ShortcutsEmitter.sort(shortcuts), handler);
+        return this;
     }
 }
 const isTextKey = (keyCode) => {
@@ -373,8 +472,8 @@ function downEnter(editor) {
         }
     };
 }
-function backspace(editor) {
-    return () => {
+function leftDelete(editor) {
+    return (e) => {
         const focusedLine = editor.findFocusedLine();
         if (focusedLine) {
             if (focusedLine.isEmpty()) {
@@ -385,7 +484,63 @@ function backspace(editor) {
                 }
             }
             else if (focusedLine.cursorIndex > 0) {
-                focusedLine.deleteText();
+                if (e.ctrlKey) {
+                    const tokens = focusedLine.text.slice(0, focusedLine.cursorIndex).split('').filter(Boolean);
+                    const splitter = ' .+*&|/%?:=\'"`,~-_(){}[]<>]/';
+                    let i = focusedLine.cursorIndex - 1;
+                    while (!splitter.includes(tokens[i]) && i >= 0) {
+                        tokens.pop();
+                        i--;
+                    }
+                    if (i >= 0) {
+                        tokens.pop();
+                    }
+                    focusedLine.setText(tokens.join(''));
+                }
+                else {
+                    focusedLine.deleteText();
+                }
+            }
+            else {
+                const prevLine = editor.findPrevLine(focusedLine);
+                if (prevLine) {
+                    prevLine.insertText(focusedLine.text);
+                    editor.removeLine(focusedLine);
+                    editor.focus(prevLine);
+                }
+            }
+        }
+    };
+}
+function rightDelete(editor) {
+    return (e) => {
+        const focusedLine = editor.findFocusedLine();
+        if (focusedLine) {
+            const cursorIndex = focusedLine.cursorIndex;
+            if (focusedLine.isEmpty()) {
+                const prevLine = editor.findPrevLine(focusedLine);
+                if (prevLine) {
+                    editor.removeLine(focusedLine);
+                    editor.focus(prevLine);
+                }
+            }
+            else if (cursorIndex > 0) {
+                if (e.ctrlKey) {
+                    const tokens = focusedLine.text.split('').filter(Boolean);
+                    const splitter = ' .+*&|/%?:=\'"`,~-_(){}[]<>]/';
+                    let i = cursorIndex;
+                    while (!splitter.includes(tokens[i]) && i < tokens.length) {
+                        tokens.splice(i, 1);
+                    }
+                    if (tokens.length === focusedLine.text.length) {
+                        tokens.splice(i, 1);
+                    }
+                    focusedLine.setText(tokens.join(''));
+                    focusedLine.cursorIndex = cursorIndex;
+                }
+                else {
+                    focusedLine.deleteText(cursorIndex, cursorIndex + 1);
+                }
             }
             else {
                 const prevLine = editor.findPrevLine(focusedLine);
@@ -469,14 +624,6 @@ function tab(editor) {
         }
     };
 }
-function space(editor) {
-    return () => {
-        const focusedLine = editor.findFocusedLine();
-        if (focusedLine) {
-            focusedLine.insertText(' ');
-        }
-    };
-}
 function rightIndent(editor) {
     return () => {
         const focusedLine = editor.findFocusedLine();
@@ -494,9 +641,11 @@ function leftIndent(editor) {
     };
 }
 
+const { min: min$1, max: max$1, round: round$1 } = Math;
 let eid = 0;
-class Editor {
+class Editor extends EventEmitter {
     constructor(elm, config = {}) {
+        super();
         this.elm = elm;
         this.lines = [];
         this.userInput = '';
@@ -504,16 +653,173 @@ class Editor {
         this.shortcutsEmitter = new ShortcutsEmitter();
         this.selecting = false;
         this.selectionAnchor = {
-            x: 0, y: 0, lineNumber: -1,
+            x: 0, lineNumber: -1,
         };
         this._decorators = new Set();
+        this._stack = new Stack(this);
         this._id = ++eid;
+        this.focus = (line, e) => {
+            this.currentLine = line;
+            const textarea = this.elm.querySelector('textarea');
+            if (textarea) {
+                textarea.focus();
+            }
+            const l = this.lines.length;
+            for (let i = 0; i < l; i++) {
+                const line = this.lines[i];
+                line.blur();
+            }
+            line.focus(e);
+        };
+        this._onKeyDown = (e) => {
+            const focusedLine = this.findFocusedLine();
+            if (!focusedLine) {
+                return;
+            }
+            if (isControlKeyPressed(e) || !isTextKey(e.keyCode)) {
+                const alt = e.altKey ? 'alt' : '';
+                const ctrl = e.ctrlKey ? 'ctrl' : '';
+                const shift = e.shiftKey ? 'shift' : '';
+                const key = isTextKey(e.keyCode) ? (KeyCodeMap[e.keyCode] || e.key.toLowerCase()) : (isControlKey(e.key) ? '' : e.code.toLowerCase());
+                const combined = [ctrl, shift, alt, key].filter(Boolean).join('+');
+                this.shortcutsEmitter.emit(combined, e);
+            }
+        };
+        this._onBlur = () => {
+            if (this.currentLine) {
+                const textarea = this.elm.querySelector('textarea');
+                if (textarea) {
+                    textarea.focus();
+                }
+            }
+            const l = this.lines.length;
+            for (let i = 0; i < l; i++) {
+                const line = this.lines[i];
+                const focused = this.currentLine === line;
+                if (line.focused !== focused) {
+                    line.focused = focused;
+                    line.update();
+                }
+            }
+            this.currentLine = undefined;
+        };
+        this._onInput = (e) => {
+            // @ts-ignore
+            if (e.isComposing || e.inputType !== 'insertText') {
+                return;
+            }
+            const target = e.target;
+            this.userInput = target.value;
+            target.value = '';
+            const focusedLine = this.findFocusedLine();
+            if (focusedLine) {
+                if (this.userInput.length === 1 && !this.userInput.includes('\n')) {
+                    const nextChar = focusedLine.text[focusedLine.cursorIndex];
+                    if (autoCompleteValues.includes(nextChar) && nextChar === this.userInput) {
+                        focusedLine.setCursor(focusedLine.cursorIndex + 1);
+                    }
+                    else {
+                        focusedLine.insertText(snippet(this.userInput));
+                        if (autoCompleteKeys.includes(this.userInput)) {
+                            focusedLine.setCursor(focusedLine.cursorIndex - 1);
+                        }
+                    }
+                }
+                else if (!this.userInput.includes('\n') && this.userInput.length > 1) {
+                    focusedLine.insertText(this.userInput);
+                }
+                else if (this.userInput.includes('\n') && this.userInput.trim().length > 1) {
+                    const focusedIndex = this.lines.indexOf(focusedLine);
+                    const rows = this.userInput.split('\n').filter(Boolean);
+                    const l = rows.length;
+                    for (let i = l - 1; i >= 0; i--) {
+                        const row = rows[i];
+                        if (i === 0) {
+                            focusedLine.insertText(row);
+                        }
+                        else {
+                            this.appendLine(focusedLine, new Line(this).setText(row));
+                        }
+                    }
+                    this.focus(this.lines[focusedIndex + l - 1]);
+                }
+            }
+        };
+        this._startSelect = (e) => {
+            const line = e.composedPath().find(target => {
+                const elm = target;
+                return elm.classList && elm.classList.contains('line');
+            });
+            if (line) {
+                this.selecting = true;
+                this.selectionAnchor = {
+                    x: e.clientX,
+                    lineNumber: Number(line.dataset.lineNumber),
+                };
+            }
+            if (!e.altKey) {
+                const l = this.lines.length;
+                for (let i = 0; i < l; i++) {
+                    const element = this.lines[i];
+                    if (element.selections.length) {
+                        element.update();
+                    }
+                    element.selections = [];
+                }
+            }
+        };
+        this._select = (e) => {
+            if (this.selecting) {
+                const alt = e.altKey;
+                const anchorNumber = this.selectionAnchor.lineNumber;
+                const focusLine = e.composedPath().find(target => {
+                    const elm = target;
+                    return elm.classList && elm.classList.contains('line');
+                });
+                if (focusLine) {
+                    const focusNumber = Number(focusLine.dataset.lineNumber);
+                    const lineLength = this.lines.length;
+                    const charWidth = this.charWidth;
+                    for (let i = 1; i < lineLength + 1; i++) {
+                        const line = this.lines[i - 1];
+                        if ((i < min$1(anchorNumber, focusNumber) || i > max$1(anchorNumber, focusNumber)) && !alt) {
+                            line.setSelections([]);
+                        }
+                        else if (i > min$1(anchorNumber, focusNumber) && i < max$1(anchorNumber, focusNumber)) {
+                            line.setSelections([[0, line.text.length]]);
+                        }
+                        else if (i === min$1(anchorNumber, focusNumber) && focusNumber !== i) {
+                            const originX = line.elm.getBoundingClientRect().left + 32;
+                            const anchorIndex = min$1(round$1((this.selectionAnchor.x - originX) / charWidth), line.text.length);
+                            if (!line.setSelectionFromAnchor(anchorIndex, line.text.length)) {
+                                alt ?
+                                    line.pushSelection([anchorIndex, line.text.length]) :
+                                    line.setSelections([[anchorIndex, line.text.length]]);
+                            }
+                        }
+                        else if (i === max$1(anchorNumber, focusNumber) && focusNumber !== i) {
+                            const originX = line.elm.getBoundingClientRect().left + 32;
+                            const anchorIndex = min$1(round$1((this.selectionAnchor.x - originX) / charWidth), line.text.length);
+                            if (!line.setSelectionFromAnchor(0, anchorIndex)) {
+                                alt ?
+                                    line.pushSelection([0, anchorIndex]) :
+                                    line.setSelections([[0, anchorIndex]]);
+                            }
+                        }
+                    }
+                }
+            }
+        };
+        this._endSelect = () => {
+            this.selecting = false;
+        };
         config.tabSize = config.tabSize || 2;
         this.config = config;
-        this.mount();
+        this._mount();
     }
     useDecorator(decorator) {
         this._decorators.add(decorator);
+        return this;
     }
     findPrevLine(line) {
         return this.lines[this.lines.indexOf(line) - 1];
@@ -551,149 +857,50 @@ class Editor {
         this._editorElm.removeChild(target.elm);
         return this;
     }
-    focus(line) {
-        this.currentLine = line;
+    deserialize(text) {
+        let l = this.lines.length;
+        for (let i = 0; i < l; i++) {
+            const line = this.lines[i];
+            line.dispose();
+        }
+        this.lines = [];
+        const rows = text.split('\n');
+        l = rows.length;
+        for (let i = 0; i < l; i++) {
+            const row = rows[i];
+            this.appendLine(new Line(this).setText(row));
+        }
+    }
+    serialize() {
+        const text = [];
+        const l = this.lines.length;
+        for (let i = 0; i < l; i++) {
+            const line = this.lines[i];
+            text.push(line.text);
+        }
+        return text.join('\n');
+    }
+    dispose() {
+        const editor = this._editorElm;
         const textarea = this.elm.querySelector('textarea');
-        if (textarea) {
-            textarea.focus();
-        }
+        document.removeEventListener('mouseup', this._endSelect);
+        editor.removeEventListener('mousedown', this._startSelect);
+        editor.removeEventListener('mousemove', this._select);
+        editor.removeEventListener('keydown', this._onKeyDown);
+        document.removeEventListener('mouseup', this._endSelect);
+        textarea.removeEventListener('blur', this._onBlur);
+        textarea.removeEventListener('input', this._onInput);
+        textarea.removeEventListener('compositionend', this._onInput);
+        textarea.removeEventListener('keydown', this._onKeyDown);
         const l = this.lines.length;
         for (let i = 0; i < l; i++) {
             const line = this.lines[i];
-            line.blur();
+            line.dispose();
         }
-        if (!line) {
-            const lastLine = tail(this.lines);
-            if (lastLine) {
-                lastLine.focus();
-                this.currentLine = lastLine;
-            }
-            return;
-        }
-        line.focus();
+        editor.remove();
+        textarea.remove();
     }
-    onKeyDown(e) {
-        const focusedLine = this.findFocusedLine();
-        if (!focusedLine) {
-            return;
-        }
-        if (isControlKeyPressed(e) || !isTextKey(e.keyCode)) {
-            this.shortcutsEmitter.emit(e);
-        }
-    }
-    onBlur() {
-        if (this.currentLine) {
-            const textarea = this.elm.querySelector('textarea');
-            if (textarea) {
-                textarea.focus();
-            }
-        }
-        const l = this.lines.length;
-        for (let i = 0; i < l; i++) {
-            const line = this.lines[i];
-            const focused = this.currentLine === line;
-            if (line.focused !== focused) {
-                line.focused = focused;
-                line.update();
-            }
-        }
-        this.currentLine = undefined;
-    }
-    onInput(e) {
-        // @ts-ignore
-        if (e.isComposing) {
-            return;
-        }
-        const target = e.target;
-        this.userInput = target.value.trim();
-        target.value = '';
-        const focusedLine = this.findFocusedLine();
-        if (focusedLine) {
-            const nextChar = focusedLine.text[focusedLine.cursorIndex];
-            if (autoCompleteValues.includes(nextChar) && nextChar === this.userInput) {
-                focusedLine.setCursor(focusedLine.cursorIndex + 1);
-            }
-            else {
-                focusedLine.insertText(snippet(this.userInput));
-                if (autoCompleteKeys.includes(this.userInput)) {
-                    focusedLine.setCursor(focusedLine.cursorIndex - 1);
-                }
-            }
-        }
-    }
-    startSelect(e) {
-        const line = e.composedPath().find(target => {
-            const elm = target;
-            return elm.classList && elm.classList.contains('line');
-        });
-        if (line) {
-            this.selecting = true;
-            this.selectionAnchor = {
-                x: e.offsetX,
-                y: e.offsetY,
-                lineNumber: Number(line.dataset.lineNumber),
-            };
-        }
-        if (!e.altKey) {
-            const l = this.lines.length;
-            for (let i = 0; i < l; i++) {
-                const element = this.lines[i];
-                if (element.selections.length) {
-                    element.update();
-                }
-                element.selections = [];
-            }
-        }
-    }
-    select(e) {
-        if (this.selecting) {
-            const alt = e.altKey;
-            const target = e.target;
-            const anchor = this.selectionAnchor.lineNumber;
-            const focusLine = e.composedPath().find(target => {
-                const elm = target;
-                return elm.classList && elm.classList.contains('line');
-            });
-            if (focusLine) {
-                const focus = Number(focusLine.dataset.lineNumber);
-                const lineLength = this.lines.length;
-                let offsetX = target.classList.contains('line--content') ? e.offsetX : e.offsetX - 32;
-                if (target.classList.contains('line--cursor')) {
-                    offsetX = 0;
-                }
-                const charWidth = this.charWidth;
-                for (let i = 1; i < lineLength + 1; i++) {
-                    const line = this.lines[i - 1];
-                    if ((i < Math.min(anchor, focus) || i > Math.max(anchor, focus)) && !alt) {
-                        line.selections = [];
-                        line.update();
-                    }
-                    else if (i > Math.min(anchor, focus) && i < Math.max(anchor, focus)) {
-                        line.selections = [[0, line.text.length]];
-                        line.update();
-                    }
-                    else if (i === Math.min(anchor, focus) && focus !== i) {
-                        const anchorIndex = Math.min(Math.round(this.selectionAnchor.x / charWidth), line.text.length);
-                        alt ?
-                            line.selections.push([anchorIndex, line.text.length]) :
-                            (line.selections = [[anchorIndex, line.text.length]]);
-                        line.update();
-                    }
-                    else if (i === Math.max(anchor, focus) && focus !== i) {
-                        const anchorIndex = Math.min(Math.round(this.selectionAnchor.x / charWidth), line.text.length);
-                        alt ?
-                            line.selections.push([0, anchorIndex]) :
-                            (line.selections = [[0, anchorIndex]]);
-                        line.update();
-                    }
-                }
-            }
-        }
-    }
-    endSelect() {
-        this.selecting = false;
-    }
-    mount() {
+    _mount() {
         const editor = h('div', undefined, { class: 'editor', id: 'editor-' + this._id });
         this._editorElm = editor;
         const linesFragment = document.createDocumentFragment();
@@ -704,37 +911,79 @@ class Editor {
         editor.addEventListener('mousedown', (e) => {
             const target = e.target;
             if (target.classList.contains('editor')) {
-                this.focus();
+                const lastLine = tail(this.lines);
+                if (lastLine) {
+                    this.focus(lastLine, e);
+                }
             }
         });
-        editor.addEventListener('mousedown', this.startSelect.bind(this));
-        editor.addEventListener('mousemove', this.select.bind(this));
-        editor.addEventListener('mouseup', this.endSelect.bind(this));
-        editor.addEventListener('keydown', this.onKeyDown.bind(this));
-        textarea.addEventListener('blur', this.onBlur.bind(this));
-        textarea.addEventListener('input', this.onInput.bind(this));
-        textarea.addEventListener('compositionend', this.onInput.bind(this));
-        textarea.addEventListener('keydown', this.onKeyDown.bind(this));
+        editor.addEventListener('mousedown', this._startSelect);
+        editor.addEventListener('mousemove', this._select);
+        editor.addEventListener('keydown', this._onKeyDown);
+        document.addEventListener('mouseup', this._endSelect);
+        textarea.addEventListener('blur', this._onBlur);
+        textarea.addEventListener('input', this._onInput);
+        textarea.addEventListener('compositionend', this._onInput);
+        textarea.addEventListener('keydown', this._onKeyDown);
+        textarea.addEventListener('copy', (e) => {
+            e.preventDefault();
+            writeClipboard(this._getSelectedText());
+        });
         this.elm.appendChild(editor);
         this.elm.appendChild(textarea);
+        this.shortcutsEmitter.on('ctrl + s', e => {
+            e.preventDefault();
+            this.emit('save', this.serialize());
+        });
+        this.shortcutsEmitter.on('ctrl + x', () => {
+            writeClipboard(this._clipSelectedText());
+        });
         this.shortcutsEmitter.on('ctrl + shift + enter', upEnter(this));
         this.shortcutsEmitter.on('enter', downEnter(this));
         this.shortcutsEmitter.on('ctrl + ]', rightIndent(this));
         this.shortcutsEmitter.on('ctrl + [', leftIndent(this));
-        this.shortcutsEmitter.on('backspace', backspace(this));
-        this.shortcutsEmitter.on('space', space(this));
+        this.shortcutsEmitter.on('backspace', leftDelete(this));
+        this.shortcutsEmitter.on('delete', rightDelete(this));
+        this.shortcutsEmitter.on('ctrl + backspace', leftDelete(this));
+        this.shortcutsEmitter.on('ctrl + delete', rightDelete(this));
+        this.shortcutsEmitter.on('ctrl + z', this._stack.undo);
         this.shortcutsEmitter.on('tab', tab(this));
         this.shortcutsEmitter.on('arrowleft', leftMove(this));
         this.shortcutsEmitter.on('arrowright', rightMove(this));
         this.shortcutsEmitter.on('arrowup', upMove(this));
         this.shortcutsEmitter.on('arrowdown', downMove(this));
-        this.onMounted();
+        this._onMounted();
     }
-    onMounted() {
+    _getSelectedText() {
+        const text = [];
+        const l = this.lines.length;
+        for (let i = 0; i < l; i++) {
+            const line = this.lines[i];
+            for (let j = 0; j < line.selections.length; j++) {
+                const selection = line.selections[j];
+                text.push((line.text || '').slice(selection[0], selection[1]));
+            }
+        }
+        return text.join('\n');
+    }
+    _clipSelectedText() {
+        const text = [];
+        const l = this.lines.length;
+        for (let i = 0; i < l; i++) {
+            const line = this.lines[i];
+            for (let j = 0; j < line.selections.length; j++) {
+                const selection = line.selections[j];
+                text.push((line.text || '').slice(selection[0], selection[1]));
+                line.setText(line.text.slice(0, selection[0]) + line.text.slice(selection[1], line.text.length));
+            }
+        }
+        return text.join('\n');
+    }
+    _onMounted() {
         this.focus(this.lines[0]);
-        this.calcCharRect();
+        this._calcCharRect();
     }
-    calcCharRect() {
+    _calcCharRect() {
         const range = document.createRange();
         const textNode = document.createTextNode('0');
         range.setStart(textNode, 0);

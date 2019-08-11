@@ -65,6 +65,81 @@ export function backspace(editor: Editor) {
     }
   };
 }
+export function leftDelete(editor: Editor) {
+  return (e: KeyboardEvent) => {
+    const focusedLine = editor.findFocusedLine();
+    if (focusedLine) {
+      if (focusedLine.isEmpty()) {
+        const prevLine = editor.findPrevLine(focusedLine);
+        if (prevLine) {
+          editor.removeLine(focusedLine);
+          editor.focus(prevLine);
+        }
+      } else if (focusedLine.cursorIndex > 0) {
+        if (e.ctrlKey) {
+          const tokens = focusedLine.text.slice(0, focusedLine.cursorIndex).split('').filter(Boolean);
+          const splitter = ' .+*&|/%?:=\'"`,~-_(){}[]<>]/';
+          let i = focusedLine.cursorIndex - 1;
+          while (!splitter.includes(tokens[i]) && i >= 0) {
+            tokens.pop();
+            i--;
+          }
+          if (i >= 0) {
+            tokens.pop();
+          }
+          focusedLine.setText(tokens.join(''));
+        } else {
+          focusedLine.deleteText();
+        }
+      } else {
+        const prevLine = editor.findPrevLine(focusedLine);
+        if (prevLine) {
+          prevLine.insertText(focusedLine.text);
+          editor.removeLine(focusedLine);
+          editor.focus(prevLine);
+        }
+      }
+    }
+  };
+}
+export function rightDelete(editor: Editor) {
+  return (e: KeyboardEvent) => {
+    const focusedLine = editor.findFocusedLine();
+    if (focusedLine) {
+      const cursorIndex = focusedLine.cursorIndex;
+      if (focusedLine.isEmpty()) {
+        const prevLine = editor.findPrevLine(focusedLine);
+        if (prevLine) {
+          editor.removeLine(focusedLine);
+          editor.focus(prevLine);
+        }
+      } else if (cursorIndex > 0) {
+        if (e.ctrlKey) {
+          const tokens = focusedLine.text.split('').filter(Boolean);
+          const splitter = ' .+*&|/%?:=\'"`,~-_(){}[]<>]/';
+          let i = cursorIndex;
+          while (!splitter.includes(tokens[i]) && i < tokens.length) {
+            tokens.splice(i, 1)
+          }
+          if (tokens.length === focusedLine.text.length) {
+            tokens.splice(i, 1);
+          }
+          focusedLine.setText(tokens.join(''));
+          focusedLine.cursorIndex = cursorIndex;
+        } else {
+          focusedLine.deleteText(cursorIndex, cursorIndex + 1);
+        }
+      } else {
+        const prevLine = editor.findPrevLine(focusedLine);
+        if (prevLine) {
+          prevLine.insertText(focusedLine.text);
+          editor.removeLine(focusedLine);
+          editor.focus(prevLine);
+        }
+      }
+    }
+  };
+}
 export function leftMove(editor: Editor) {
   return () => {
     const focusedLine = editor.findFocusedLine();
@@ -132,14 +207,6 @@ export function tab(editor: Editor) {
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
       focusedLine.insertText(' '.repeat(editor.config.tabSize));
-    }
-  };
-}
-export function space(editor: Editor) {
-  return () => {
-    const focusedLine = editor.findFocusedLine();
-    if (focusedLine) {
-      focusedLine.insertText(' ');
     }
   };
 }

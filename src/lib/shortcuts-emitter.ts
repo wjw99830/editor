@@ -1,40 +1,24 @@
-type ShortcutsHandler = () => any;
+import { EventEmitter } from "./event-emitter";
 
-export class ShortcutsEmitter {
-  shortcuts: Map<string, Set<ShortcutsHandler>> = new Map();
-  emit(e: KeyboardEvent) {
-    const alt = e.altKey ? 'alt' : '';
-    const ctrl = e.ctrlKey ? 'ctrl' : '';
-    const shift = e.shiftKey ? 'shift' : '';
-    const key = isTextKey(e.keyCode) ? (KeyCodeMap[e.keyCode] || e.key.toLowerCase()) : (isControlKey(e.key) ? '' : e.code.toLowerCase());
-    const combined = [ctrl, shift, alt, key].filter(Boolean).join('+');
-    const handlers = this.shortcuts.get(combined);
-    if (!e.key.startsWith('F')) {
-      e.preventDefault();
-    }
-    if (handlers) {
-      for (const handler of handlers) {
-        handler();
-      }
-    }
+type ShortcutsHandler = (e: KeyboardEvent) => void;
+
+export class ShortcutsEmitter extends EventEmitter {
+  static sort(shortcuts: string) {
+    const keys = shortcuts.split('+');
+    const alt = keys.includes('alt');
+    const ctrl = keys.includes('ctrl');
+    const shift = keys.includes('shift');
+    return [ctrl && 'ctrl', shift && 'shift', alt && 'alt', keys.find(key => !['ctrl', 'shift', 'alt'].includes(key))].filter(Boolean).join('+');
   }
   on(shortcuts: string, handler: ShortcutsHandler) {
     shortcuts = shortcuts.split('+').map(key => key.toLowerCase().trim()).join('+');
-    let handlers = this.shortcuts.get(shortcuts);
-    if (handlers) {
-      handlers.add(handler);
-    } else {
-      handlers = new Set();
-      handlers.add(handler);
-      this.shortcuts.set(shortcuts, handlers);
-    }
+    super.on(ShortcutsEmitter.sort(shortcuts), handler);
+    return this;
   }
   off(shortcuts: string, handler: ShortcutsHandler) {
     shortcuts = shortcuts.split('+').map(key => key.toLowerCase().trim()).join('+');
-    const handlers = this.shortcuts.get(shortcuts);
-    if (handlers) {
-      handlers.delete(handler);
-    }
+    this.off(ShortcutsEmitter.sort(shortcuts), handler);
+    return this;
   }
 }
 
