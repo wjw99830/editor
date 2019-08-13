@@ -1,7 +1,7 @@
 import { EditorConfig } from "../types";
 import { Editor } from "./editor";
 import { h } from "../dom";
-import { stack, Operation, pushOperation } from "./stack";
+import { Operation } from "./stack";
 import { microtask, deepClone, tail } from "../util";
 
 const { min, max, round, abs } = Math;
@@ -16,6 +16,8 @@ export class Line {
   public elm!: HTMLElement;
   public editorConfig!: EditorConfig;
   public selections: Selection[] = [];
+  public prevLine?: Line;
+  public nextLine?: Line;
   private _willUpdate = false;
 
   constructor(
@@ -40,7 +42,7 @@ export class Line {
     return this;
   }
   setSelections(selections: Selection[]) {
-    const ptrs = selections.flat().sort((a, b) => a - b).filter(ptr => ptr <= this.text.length);
+    const ptrs = selections.flat().sort((a, b) => a - b).filter(ptr => ptr <= this.text.length + 1);
     this.selections = [];
     const l = ptrs.length;
     for (let i = 0; i < l; i++) {
@@ -182,10 +184,10 @@ export class Line {
       const originX = this.elm.getBoundingClientRect().left + 32;
       const focus = round((e.clientX - originX) / charWidth);
       const anchor = min(round((this.editor.selectionAnchor.x - originX) / charWidth), this.text.length);
-      if (lineNumber < anchorNumber && !this.setSelectionFromAnchor(max(focus, 0), this.text.length)) {
+      if (lineNumber < anchorNumber && !this.setSelectionFromAnchor(max(focus, 0), this.text.length + 1)) {
         alt ?
-          this.pushSelection([max(focus, 0), this.text.length]) :
-          this.setSelections([[max(focus, 0), this.text.length]])
+          this.pushSelection([max(focus, 0), this.text.length + 1]) :
+          this.setSelections([[max(focus, 0), this.text.length + 1]])
       } else if (lineNumber === anchorNumber && !this.setSelectionFromAnchor(max(0, min(focus, anchor)), min(this.text.length, max(focus, anchor)))) {
         alt ?
           this.pushSelection([max(0, min(focus, anchor)), min(this.text.length, max(focus, anchor))]) :

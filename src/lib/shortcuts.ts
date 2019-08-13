@@ -78,16 +78,17 @@ export function leftDelete(editor: Editor) {
       } else if (focusedLine.cursorIndex > 0) {
         if (e.ctrlKey) {
           const tokens = focusedLine.text.slice(0, focusedLine.cursorIndex).split('').filter(Boolean);
-          const splitter = ' .+*&|/%?:=\'"`,~-_(){}[]<>]/';
-          let i = focusedLine.cursorIndex - 1;
-          while (!splitter.includes(tokens[i]) && i >= 0) {
-            tokens.pop();
+          const splitter = ' .+*&|/%?:;=\'"`,~-_(){}[]<>]/';
+          let i = focusedLine.cursorIndex;
+          while (!splitter.includes(tokens[i - 1]) && i >= 1) {
             i--;
           }
-          if (i >= 0) {
-            tokens.pop();
+          if (!tokens.join('').trim()) {
+            i = 0;
+          } else if (i >= 1 && i === focusedLine.cursorIndex) {
+            i--;
           }
-          focusedLine.setText(tokens.join(''));
+          focusedLine.deleteText(focusedLine.cursorIndex, i);
         } else {
           focusedLine.deleteText();
         }
@@ -118,14 +119,13 @@ export function rightDelete(editor: Editor) {
           const tokens = focusedLine.text.split('').filter(Boolean);
           const splitter = ' .+*&|/%?:=\'"`,~-_(){}[]<>]/';
           let i = cursorIndex;
-          while (!splitter.includes(tokens[i]) && i < tokens.length) {
-            tokens.splice(i, 1)
+          while (!splitter.includes(tokens[i]) && i <= focusedLine.text.length) {
+            i++;
           }
-          if (tokens.length === focusedLine.text.length) {
-            tokens.splice(i, 1);
+          if (i === cursorIndex) {
+            i++;
           }
-          focusedLine.setText(tokens.join(''));
-          focusedLine.cursorIndex = cursorIndex;
+          focusedLine.deleteText(cursorIndex, i);
         } else {
           focusedLine.deleteText(cursorIndex, cursorIndex + 1);
         }
@@ -203,7 +203,8 @@ export function downMove(editor: Editor) {
   }
 }
 export function tab(editor: Editor) {
-  return () => {
+  return (e: KeyboardEvent) => {
+    e.preventDefault();
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
       focusedLine.insertText(' '.repeat(editor.config.tabSize));
@@ -214,7 +215,7 @@ export function rightIndent(editor: Editor) {
   return () => {
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
-      focusedLine.insertText(' '.repeat(editor.config.tabSize));
+      focusedLine.insertText(' '.repeat(editor.config.tabSize), 0);
     }
   }
 }
@@ -222,7 +223,7 @@ export function leftIndent(editor: Editor) {
   return () => {
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
-      focusedLine.deleteText(0, Math.min(focusedLine.getIndent().length, editor.config.tabSize));
+      focusedLine.deleteText(Math.min(focusedLine.getIndent().length, editor.config.tabSize), 0);
     }
   }
 }

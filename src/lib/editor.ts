@@ -1,12 +1,12 @@
-import { h, $, writeClipboard } from "../dom";
+import { h, $ } from "../dom";
 import { EditorConfig, Empty } from "../types";
 import { Line } from "./line";
-import { tail } from "../util";
+import { tail, microtask } from "../util";
 import { ShortcutsEmitter, isControlKeyPressed, isTextKey, KeyCodeMap, isControlKey } from "./shortcuts-emitter";
 import { snippet, autoCompleteValues, autoCompleteKeys } from "./snippet";
 import { downEnter, upEnter, rightIndent, leftIndent, leftMove, rightMove, upMove, downMove, tab, leftDelete, rightDelete } from "./shortcuts";
 import { EventEmitter } from "./event-emitter";
-import { Stack } from "./stack";
+import { Stack, Operation } from "./stack";
 
 const { min, max, round } = Math;
 let eid = 0;
@@ -53,28 +53,49 @@ export class Editor extends EventEmitter {
   appendLine(newLine: Line): this;
   appendLine(target: Line, newLine: Line): this;
   appendLine(target: Line, newLine?: Line) {
+    const nextLine = this.lines[this.lines.indexOf(target) + 1];
     if (newLine) {
+      newLine.prevLine = target;
+      target.nextLine = newLine;
       this.lines.splice(this.lines.indexOf(target) + 1, 0, newLine);
-      const nextSibling = target.elm.nextElementSibling;
-      if (nextSibling) {
-        this._editorElm.insertBefore(newLine.elm, nextSibling);
+      if (nextLine) {
+        newLine.nextLine = nextLine;
+        nextLine.prevLine = newLine;
+        this._editorElm.insertBefore(newLine.elm, nextLine.elm);
       } else {
         this._editorElm.appendChild(newLine.elm);
       }
     } else {
+      const prevLine = tail(this.lines);
+      if (prevLine) {
+        prevLine.nextLine = target;
+        target.prevLine = prevLine;
+      }
       this.lines.push(target);
       this._editorElm.appendChild(target.elm);
     }
     return this;
   }
   prependLine(target: Line, newLine: Line) {
+    const prevLine = this.lines[this.lines.indexOf(target) - 1];
+    if (prevLine) {
+      prevLine.nextLine = newLine;
+      newLine.prevLine = prevLine;
+    }
     this.lines.splice(this.lines.indexOf(target), 0, newLine);
     this._editorElm.insertBefore(newLine.elm, target.elm);
+    target.prevLine = newLine;
+    newLine.nextLine = target;
     return this;
   }
   removeLine(target: Line) {
-    this.lines.splice(this.lines.indexOf(target), 1);
-    this._editorElm.removeChild(target.elm);
+    const index = this.lines.indexOf(target);
+    const prevLine = this.lines[index - 1];
+    const nextLine = this.lines[index + 1];
+    prevLine.nextLine = nextLine;
+    nextLine.prevLine = prevLine;
+    this.lines.splice(index, 1);
+    target.dispose();
     return this;
   }
   focus = (line: Line, e?: MouseEvent) => {
@@ -158,18 +179,12 @@ export class Editor extends EventEmitter {
     textarea.addEventListener('input', this._onInput);
     textarea.addEventListener('compositionend', this._onInput);
     textarea.addEventListener('keydown', this._onKeyDown);
-    textarea.addEventListener('copy', (e) => {
-      e.preventDefault();
-      writeClipboard(this._getSelectedText());
-    });
+    textarea.addEventListener('cut', this._cut);
     this.elm.appendChild(editor);
     this.elm.appendChild(textarea);
     this.shortcutsEmitter.on('ctrl + s', e => {
       e.preventDefault();
       this.emit('save', this.serialize());
-    });
-    this.shortcutsEmitter.on('ctrl + x', () => {
-      writeClipboard(this._clipSelectedText());
     });
     this.shortcutsEmitter.on('ctrl + shift + enter', upEnter(this));
     this.shortcutsEmitter.on('enter', downEnter(this));
@@ -222,7 +237,7 @@ export class Editor extends EventEmitter {
   }
   private _onInput = (e: Event) => {
     // @ts-ignore
-    if (e.isComposing || e.inputType !== 'insertText') {
+    if (e.isComposing || e.inputType !== 'insertText' && e.inputType !== 'insertFromPaste') {
       return;
     }
     const target = e.target as HTMLTextAreaElement;
@@ -273,11 +288,8 @@ export class Editor extends EventEmitter {
     if (!e.altKey) {
       const l = this.lines.length;
       for (let i = 0; i < l; i++) {
-        const element = this.lines[i];
-        if (element.selections.length) {
-          element.update();
-        }
-        element.selections = [];
+        const line = this.lines[i];
+        line.setSelections([]);
       }
     }
   }
@@ -285,29 +297,29 @@ export class Editor extends EventEmitter {
     if (this.selecting) {
       const alt = e.altKey;
       const anchorNumber = this.selectionAnchor.lineNumber;
-      const focusLine = e.composedPath().find(target => {
+      const focusedLine = e.composedPath().find(target => {
         const elm = target as HTMLElement;
         return elm.classList && elm.classList.contains('line');
       }) as HTMLElement | Empty;
-      if (focusLine) {
-        const focusNumber = Number(focusLine.dataset.lineNumber);
+      if (focusedLine) {
+        const focusedNumber = Number(focusedLine.dataset.lineNumber);
         const lineLength = this.lines.length;
         const charWidth = this.charWidth;
-        for (let i = 1; i < lineLength + 1; i++) {
+        for (let i = 1; i <= lineLength; i++) {
           const line = this.lines[i - 1];
-          if ((i < min(anchorNumber, focusNumber) || i > max(anchorNumber, focusNumber)) && !alt) {
+          if ((i < min(anchorNumber, focusedNumber) || i > max(anchorNumber, focusedNumber)) && !alt) {
             line.setSelections([]);
-          } else if (i > min(anchorNumber, focusNumber) && i < max(anchorNumber, focusNumber)) {
-            line.setSelections([[0, line.text.length]]);
-          } else if (i === min(anchorNumber, focusNumber) && focusNumber !== i) {
+          } else if (i > min(anchorNumber, focusedNumber) && i < max(anchorNumber, focusedNumber)) {
+            line.setSelections([[0, line.text.length + 1]]);
+          } else if (i === min(anchorNumber, focusedNumber) && focusedNumber !== i) {
             const originX = line.elm.getBoundingClientRect().left + 32;
             const anchorIndex = min(round((this.selectionAnchor.x - originX) / charWidth), line.text.length);
-            if (!line.setSelectionFromAnchor(anchorIndex, line.text.length)) {
+            if (!line.setSelectionFromAnchor(anchorIndex, line.text.length + 1)) {
               alt ?
-                line.pushSelection([anchorIndex, line.text.length]) :
-                line.setSelections([[anchorIndex, line.text.length]])
+                line.pushSelection([anchorIndex, line.text.length + 1]) :
+                line.setSelections([[anchorIndex, line.text.length + 1]])
             }
-          } else if (i === max(anchorNumber, focusNumber) && focusNumber !== i) {
+          } else if (i === max(anchorNumber, focusedNumber) && focusedNumber !== i) {
             const originX = line.elm.getBoundingClientRect().left + 32;
             const anchorIndex = min(round((this.selectionAnchor.x - originX) / charWidth), line.text.length);
             if (!line.setSelectionFromAnchor(0, anchorIndex)) {
@@ -317,11 +329,72 @@ export class Editor extends EventEmitter {
             }
           }
         }
+        this.focus(this.lines[focusedNumber - 1]);
+        const originX = focusedLine.getBoundingClientRect().left + 32;
+        this.lines[focusedNumber - 1].setCursor(round((e.clientX - originX) / charWidth));
       }
     }
   }
   private _endSelect = () => {
     this.selecting = false;
+    const textarea = this.elm.querySelector('textarea');
+    if (textarea) {
+      textarea.value = this._getSelectedText();
+      textarea.select();
+    }
+  }
+  private _cut = () => {
+    const selectedText = this._getSelectedText();
+    let startIndex = 0;
+    let startLine: Line | Empty = null;
+    for (let i = 0; i < this.lines.length; i++) {
+      let line: Line | Empty = this.lines[i];
+      if (!line.selections.length) {
+        continue;
+      }
+      startLine = line;
+      startIndex = line.selections[0][0];
+      let selectionsLengh;
+      let tailSelection;
+      let nextLine: Line | Empty;
+      let textLength;
+      // Recursively delete selected text for behind 
+      while (line) {
+        selectionsLengh = line.selections.length;
+        textLength = line.text.length;
+        for (let j = 0; j < selectionsLengh; j++) {
+          const selection = line.selections[j];
+          line.deleteText(selection[0], selection[1], false);
+        }
+        tailSelection = tail(line.selections);
+        nextLine = line.nextLine;
+        if (this.lines[i] !== line) {
+          const prevLine = line.prevLine;
+          if (prevLine) {
+            const startIndex = prevLine.text.length;
+            prevLine.insertText(line.text, startIndex, false);
+            prevLine.setCursor(startIndex);
+          }
+          this.removeLine(line);
+        }
+        if (tailSelection && tailSelection[1] === textLength + 1) {
+          line.setSelections([]);
+          line = nextLine;
+        } else {
+          line.setSelections([]);
+          line = null;
+        }
+      }
+      this.focus(this.lines[i]);
+    }
+    if (startLine) {
+      this._stack.push({
+        type: Operation.CUT,
+        id: startLine.id,
+        startIndex,
+        text: selectedText,
+      });
+    }
   }
   private _getSelectedText() {
     const text: string[] = [];
@@ -331,19 +404,6 @@ export class Editor extends EventEmitter {
       for (let j = 0; j < line.selections.length; j++) {
         const selection = line.selections[j];
         text.push((line.text || '').slice(selection[0], selection[1]));
-      }
-    }
-    return text.join('\n');
-  }
-  private _clipSelectedText() {
-    const text: string[] = [];
-    const l = this.lines.length;
-    for (let i = 0; i < l; i++) {
-      const line = this.lines[i];
-      for (let j = 0; j < line.selections.length; j++) {
-        const selection = line.selections[j];
-        text.push((line.text || '').slice(selection[0], selection[1]));
-        line.setText(line.text.slice(0, selection[0]) + line.text.slice(selection[1], line.text.length));
       }
     }
     return text.join('\n');
