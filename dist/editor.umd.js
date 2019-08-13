@@ -876,6 +876,7 @@
                       for (let j = 0; j < selectionsLengh; j++) {
                           const selection = line.selections[j];
                           line.deleteText(selection[0], selection[1], false);
+                          line.setCursor(selection[0]);
                       }
                       tailSelection = tail(line.selections);
                       nextLine = line.nextLine;
