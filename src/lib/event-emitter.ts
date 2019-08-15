@@ -13,8 +13,8 @@ export class EventEmitter {
     return this;
   }
   public once(event: string, handler: EventHandler) {
-    const wrapper = () => {
-      handler.call(undefined, ...arguments);
+    const wrapper = (...args: any[]) => {
+      handler.call(undefined, ...args);
       this.off(event, wrapper);
     }
     this.on(event, wrapper);
