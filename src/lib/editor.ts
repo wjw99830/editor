@@ -50,11 +50,16 @@ export class Editor extends EventEmitter {
     return this.lines.find(line => line.focused);
   }
 
-  appendLine(newLine: Line): this;
-  appendLine(target: Line, newLine: Line): this;
-  appendLine(target: Line, newLine?: Line) {
+  appendLine(newLine: Line, pushToStack?: boolean): this;
+  appendLine(target: Line, newLine: Line, pushToStack?: boolean): this;
+  appendLine(target: Line, newLine: Line | boolean = true, pushToStack = true) {
     const nextLine = this.lines[this.lines.indexOf(target) + 1];
-    if (newLine) {
+    let _pushToStack = true;
+    let prevId: number | void = undefined;
+    let newId: number;
+    if (newLine instanceof Line) {
+      newId = newLine.id;
+      prevId = target.id;
       newLine.prevLine = target;
       target.nextLine = newLine;
       this.lines.splice(this.lines.indexOf(target) + 1, 0, newLine);
@@ -65,18 +70,29 @@ export class Editor extends EventEmitter {
       } else {
         this._editorElm.appendChild(newLine.elm);
       }
+      _pushToStack = pushToStack;
     } else {
+      newId = target.id;
       const prevLine = tail(this.lines);
       if (prevLine) {
         prevLine.nextLine = target;
         target.prevLine = prevLine;
+        prevId = prevLine.id;
       }
       this.lines.push(target);
       this._editorElm.appendChild(target.elm);
+      _pushToStack = newLine;
+    }
+    if (_pushToStack) {
+      this._stack.push({
+        type: Operation.INSERT_LINE,
+        prevId,
+        newId,
+      });
     }
     return this;
   }
-  prependLine(target: Line, newLine: Line) {
+  prependLine(target: Line, newLine: Line, pushToStack = true) {
     const prevLine = this.lines[this.lines.indexOf(target) - 1];
     if (prevLine) {
       prevLine.nextLine = newLine;
@@ -86,15 +102,28 @@ export class Editor extends EventEmitter {
     this._editorElm.insertBefore(newLine.elm, target.elm);
     target.prevLine = newLine;
     newLine.nextLine = target;
+    if (pushToStack) {
+      this._stack.push({
+        type: Operation.INSERT_LINE,
+        newId: newLine.id,
+        nextId: target.id,
+      });
+    }
     return this;
   }
-  removeLine(target: Line) {
+  removeLine(target: Line, pushToStack = true) {
     const index = this.lines.indexOf(target);
     const prevLine = this.lines[index - 1];
     const nextLine = this.lines[index + 1];
     prevLine.nextLine = nextLine;
     nextLine.prevLine = prevLine;
     this.lines.splice(index, 1);
+    if (pushToStack) {
+      this._stack.push({
+        type: Operation.REMOVE_LINE,
+        state: target.clone(),
+      });
+    }
     target.dispose();
     return this;
   }
@@ -122,7 +151,7 @@ export class Editor extends EventEmitter {
     l = rows.length;
     for (let i = 0; i < l; i++) {
       const row = rows[i];
-      this.appendLine(new Line(this).setText(row));
+      this.appendLine(new Line(this).setText(row), false);
     }
   }
   serialize() {

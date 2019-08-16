@@ -15,10 +15,3 @@ export const h = (tag: string, props: DOMProps = {}, attrs: DOMAttrs = {}, text:
   elm.textContent = text.toString();
   return elm;
 };
-export function writeClipboard(text: string) {
-  const clipboard = h('textarea', { value: text }, { readonly: '', class: 'editor--clipboard' }) as HTMLInputElement;
-  document.body.appendChild(clipboard);
-  clipboard.select();
-  document.execCommand('copy');
-  clipboard.remove();
-}

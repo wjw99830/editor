@@ -1,23 +1,15 @@
 import { Editor } from "./editor";
 import { Line } from "./line";
+import { tail } from "../util";
 
-let ptr = -1;
-export const stack: any[] = [];
-export function pushOperation(operation: any) {
-  stack.push(operation);
-  ptr = stack.length - 1;
-}
-export function undo() {
-  const operation = stack[ptr];
-  switch (operation.type) {
-    case Operation.INSERT_TEXT:
-  }
-}
-export function redo() {}
 export const Operation = {
   DELETE_TEXT: 'deleteText',
   INSERT_TEXT: 'insertText',
   CUT: 'cut',
+  INSERT_LINE: 'insertLine',
+  APPEND_LINE: 'appendLine',
+  REMOVE_LINE: 'removeLine',
+  PREPEND_LINE: 'prependLine',
 };
 export class Stack {
   private _innerStack: any[] = [];
@@ -61,26 +53,41 @@ export class Stack {
             for (let i = 0; i < l; i++) {
               const row = rows[i];
               if (i === 0) {
+                let selectionEnd = opt.startIndex + row.length;
                 if (l > 1) {
-                  const newLine = new Line(this._editor).setText(line.text.slice(opt.startIndex));
-                  line.deleteText(opt.startIndex, line.text.length, false);
-                  this._editor.appendLine(line, newLine);
+                  // const newLine = new Line(this._editor);
+                  // line.deleteText(opt.startIndex, line.text.length, false);
+                  // this._editor.appendLine(line, newLine, false);
+                  selectionEnd++;
                 }
                 line.insertText(row, opt.startIndex, false);
                 line.setCursor(opt.startIndex);
-                line.pushSelection([opt.startIndex, opt.startIndex + row.length]);
+                line.pushSelection([opt.startIndex, selectionEnd]);
               } else if (i < l - 1) {
                 const newLine = new Line(this._editor).setText(row);
                 newLine.pushSelection([0, newLine.text.length + 1]);
-                this._editor.appendLine(line, newLine);
+                this._editor.appendLine(line, newLine, false);
               } else {
-                line.insertText(row, 0, false);
-                line.pushSelection([0, row.length]);
+                const newLine = new Line(this._editor).setText(row);
+                // line.insertText(row, 0, false);
+                newLine.pushSelection([0, row.length]);
+                this._editor.appendLine(line, newLine, false);
               }
-              if (line.nextLine) {
+              if (line.nextLine && i !== 0) {
                 line = line.nextLine;
               }
             }
+          }
+          this.ptr--;
+          break;
+        }
+        case Operation.INSERT_LINE: {
+          const line = this._editor.lines.find(line => line.id === opt.newId);
+          if (line) {
+            let shouldFocusId = opt.prevId || opt.nextId;
+            let shouldFocusLine = this._editor.lines.find(line => line.id === shouldFocusId);
+            shouldFocusLine && this._editor.focus(shouldFocusLine);
+            this._editor.removeLine(line, false);
           }
           this.ptr--;
           break;
@@ -89,5 +96,5 @@ export class Stack {
       }
     }
   }
-  redo() {}
+  redo = () => {}
 }

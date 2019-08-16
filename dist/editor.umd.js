@@ -108,6 +108,10 @@
         DELETE_TEXT: 'deleteText',
         INSERT_TEXT: 'insertText',
         CUT: 'cut',
+        INSERT_LINE: 'insertLine',
+        APPEND_LINE: 'appendLine',
+        REMOVE_LINE: 'removeLine',
+        PREPEND_LINE: 'prependLine',
     };
     var Stack = /** @class */ (function () {
         function Stack(_editor) {
@@ -147,28 +151,43 @@
                                 for (var i = 0; i < l; i++) {
                                     var row = rows[i];
                                     if (i === 0) {
+                                        var selectionEnd = opt.startIndex + row.length;
                                         if (l > 1) {
-                                            var newLine = new Line(_this._editor).setText(line.text.slice(opt.startIndex));
-                                            line.deleteText(opt.startIndex, line.text.length, false);
-                                            _this._editor.appendLine(line, newLine);
+                                            // const newLine = new Line(this._editor);
+                                            // line.deleteText(opt.startIndex, line.text.length, false);
+                                            // this._editor.appendLine(line, newLine, false);
+                                            selectionEnd++;
                                         }
                                         line.insertText(row, opt.startIndex, false);
                                         line.setCursor(opt.startIndex);
-                                        line.pushSelection([opt.startIndex, opt.startIndex + row.length]);
+                                        line.pushSelection([opt.startIndex, selectionEnd]);
                                     }
                                     else if (i < l - 1) {
                                         var newLine = new Line(_this._editor).setText(row);
                                         newLine.pushSelection([0, newLine.text.length + 1]);
-                                        _this._editor.appendLine(line, newLine);
+                                        _this._editor.appendLine(line, newLine, false);
                                     }
                                     else {
-                                        line.insertText(row, 0, false);
-                                        line.pushSelection([0, row.length]);
+                                        var newLine = new Line(_this._editor).setText(row);
+                                        // line.insertText(row, 0, false);
+                                        newLine.pushSelection([0, row.length]);
+                                        _this._editor.appendLine(line, newLine, false);
                                     }
-                                    if (line.nextLine) {
+                                    if (line.nextLine && i !== 0) {
                                         line = line.nextLine;
                                     }
                                 }
+                            }
+                            _this.ptr--;
+                            break;
+                        }
+                        case Operation.INSERT_LINE: {
+                            var line = _this._editor.lines.find(function (line) { return line.id === opt.newId; });
+                            if (line) {
+                                var shouldFocusId_1 = opt.prevId || opt.nextId;
+                                var shouldFocusLine = _this._editor.lines.find(function (line) { return line.id === shouldFocusId_1; });
+                                shouldFocusLine && _this._editor.focus(shouldFocusLine);
+                                _this._editor.removeLine(line, false);
                             }
                             _this.ptr--;
                             break;
@@ -177,12 +196,12 @@
                     }
                 }
             };
+            this.redo = function () { };
         }
         Stack.prototype.push = function (opt) {
             this._innerStack.push(opt);
             this.ptr = this._innerStack.length - 1;
         };
-        Stack.prototype.redo = function () { };
         return Stack;
     }());
 
@@ -301,6 +320,16 @@
             this.editorConfig = editor.config;
             this._createElm();
         }
+        Line.prototype.clone = function () {
+            var _a = this, id = _a.id, text = _a.text, lineNumber = _a.lineNumber, selections = _a.selections, cursorIndex = _a.cursorIndex;
+            return {
+                id: id,
+                text: text,
+                lineNumber: lineNumber,
+                cursorIndex: cursorIndex,
+                selections: deepClone(selections),
+            };
+        };
         Line.prototype.isEmpty = function () {
             return !this.text.length;
         };
@@ -1112,9 +1141,16 @@
         Editor.prototype.findFocusedLine = function () {
             return this.lines.find(function (line) { return line.focused; });
         };
-        Editor.prototype.appendLine = function (target, newLine) {
+        Editor.prototype.appendLine = function (target, newLine, pushToStack) {
+            if (newLine === void 0) { newLine = true; }
+            if (pushToStack === void 0) { pushToStack = true; }
             var nextLine = this.lines[this.lines.indexOf(target) + 1];
-            if (newLine) {
+            var _pushToStack = true;
+            var prevId = undefined;
+            var newId;
+            if (newLine instanceof Line) {
+                newId = newLine.id;
+                prevId = target.id;
                 newLine.prevLine = target;
                 target.nextLine = newLine;
                 this.lines.splice(this.lines.indexOf(target) + 1, 0, newLine);
@@ -1126,19 +1162,31 @@
                 else {
                     this._editorElm.appendChild(newLine.elm);
                 }
+                _pushToStack = pushToStack;
             }
             else {
+                newId = target.id;
                 var prevLine = tail(this.lines);
                 if (prevLine) {
                     prevLine.nextLine = target;
                     target.prevLine = prevLine;
+                    prevId = prevLine.id;
                 }
                 this.lines.push(target);
                 this._editorElm.appendChild(target.elm);
+                _pushToStack = newLine;
+            }
+            if (_pushToStack) {
+                this._stack.push({
+                    type: Operation.INSERT_LINE,
+                    prevId: prevId,
+                    newId: newId,
+                });
             }
             return this;
         };
-        Editor.prototype.prependLine = function (target, newLine) {
+        Editor.prototype.prependLine = function (target, newLine, pushToStack) {
+            if (pushToStack === void 0) { pushToStack = true; }
             var prevLine = this.lines[this.lines.indexOf(target) - 1];
             if (prevLine) {
                 prevLine.nextLine = newLine;
@@ -1148,15 +1196,29 @@
             this._editorElm.insertBefore(newLine.elm, target.elm);
             target.prevLine = newLine;
             newLine.nextLine = target;
+            if (pushToStack) {
+                this._stack.push({
+                    type: Operation.INSERT_LINE,
+                    newId: newLine.id,
+                    nextId: target.id,
+                });
+            }
             return this;
         };
-        Editor.prototype.removeLine = function (target) {
+        Editor.prototype.removeLine = function (target, pushToStack) {
+            if (pushToStack === void 0) { pushToStack = true; }
             var index = this.lines.indexOf(target);
             var prevLine = this.lines[index - 1];
             var nextLine = this.lines[index + 1];
             prevLine.nextLine = nextLine;
             nextLine.prevLine = prevLine;
             this.lines.splice(index, 1);
+            if (pushToStack) {
+                this._stack.push({
+                    type: Operation.REMOVE_LINE,
+                    state: target.clone(),
+                });
+            }
             target.dispose();
             return this;
         };
@@ -1171,7 +1233,7 @@
             l = rows.length;
             for (var i = 0; i < l; i++) {
                 var row = rows[i];
-                this.appendLine(new Line(this).setText(row));
+                this.appendLine(new Line(this).setText(row), false);
             }
         };
         Editor.prototype.serialize = function () {

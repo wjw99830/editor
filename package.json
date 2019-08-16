@@ -27,5 +27,8 @@
     "rollup": "^1.18.0",
     "rollup-plugin-typescript2": "^0.22.1",
     "typescript": "^3.5.3"
+  },
+  "dependencies": {
+    "@wpkg/utils": "^0.1.2"
   }
 }

@@ -12,6 +12,11 @@
   resolved "https://registry.npm.taobao.org/@types/node/download/@types/node-12.6.9.tgz#ffeee23afdc19ab16e979338e7b536fdebbbaeaf"
   integrity sha1-/+7iOv3BmrFul5M457U2/eu7rq8=
 
+"@wpkg/utils@^0.1.2":
+  version "0.1.2"
+  resolved "https://registry.npm.taobao.org/@wpkg/utils/download/@wpkg/utils-0.1.2.tgz#30f47d7b1292cb34c115e2ea137dbc90fb80fb4d"
+  integrity sha1-MPR9exKSyzTBFeLqE328kPuA+00=
+
 acorn@^6.2.0:
   version "6.2.1"
   resolved "https://registry.npm.taobao.org/acorn/download/acorn-6.2.1.tgz#3ed8422d6dec09e6121cc7a843ca86a330a86b51"

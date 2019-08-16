@@ -27,6 +27,16 @@ export class Line {
     this._createElm();
   }
 
+  clone() {
+    const { id, text, lineNumber, selections, cursorIndex } = this;
+    return {
+      id,
+      text,
+      lineNumber,
+      cursorIndex,
+      selections: deepClone(selections),
+    };
+  }
   isEmpty() {
     return !this.text.length;
   }
