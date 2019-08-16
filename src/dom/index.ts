@@ -1,4 +1,4 @@
-import { IndexSignature, Empty } from "../types";
+import { IndexSignature, Empty } from '../types';
 
 type DOMProps = Record<string, any>;
 type DOMAttrs = Record<string, string | Empty>;

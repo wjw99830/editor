@@ -1,4 +1,4 @@
-import { Empty } from "../types";
+import { Empty } from '../types';
 
 export const snippet = (input: string) => {
   return input + (autoCompleteMap[input] || '');

@@ -1,7 +1,7 @@
-import { Editor } from "./editor";
-import { Line } from "./line";
-import { microtask } from "../util";
-import { autoCompleteKeys, autoCompleteValues } from "./snippet";
+import { Editor } from './editor';
+import { Line } from './line';
+import { microtask } from '../util';
+import { autoCompleteKeys, autoCompleteValues } from './snippet';
 
 export function upEnter(editor: Editor) {
   return () => {
@@ -20,24 +20,25 @@ export function downEnter(editor: Editor) {
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
       const line = new Line(editor);
-      editor.appendLine(focusedLine, line);
       if (focusedLine) {
         let nextIndent = focusedLine.getIndent().length;
         if (autoCompleteKeys.concat(['.']).includes(focusedLine.text[focusedLine.cursorIndex - 1])) {
           nextIndent += editor.config.tabSize;
-          microtask(handler);
+          // microtask(handler);
         } else if (autoCompleteValues.includes(focusedLine.text[focusedLine.cursorIndex])) {
           nextIndent -= editor.config.tabSize;
           microtask(editor.focus.bind(editor), focusedLine);
         }
-        line.setText(' '.repeat(nextIndent));
         if (focusedLine.cursorIndex < focusedLine.text.length) {
           const textWhichMoveToNextLine = focusedLine.text.slice(focusedLine.cursorIndex, focusedLine.text.length);
           focusedLine.setText(focusedLine.text.slice(0, focusedLine.cursorIndex));
-          line.insertText(textWhichMoveToNextLine);
+          line.insertText(' '.repeat(nextIndent) + textWhichMoveToNextLine);
           line.setCursor(nextIndent);
+        } else {
+          line.insertText(' '.repeat(nextIndent));
         }
       }
+      editor.appendLine(focusedLine, line);
       editor.focus(line);
     }
   };
@@ -204,7 +205,7 @@ export function downMove(editor: Editor) {
         editor.focus(nextLine);
       }
     }
-  }
+  };
 }
 export function tab(editor: Editor) {
   return (e: KeyboardEvent) => {
@@ -221,7 +222,7 @@ export function rightIndent(editor: Editor) {
     if (focusedLine) {
       focusedLine.insertText(' '.repeat(editor.config.tabSize), 0);
     }
-  }
+  };
 }
 export function leftIndent(editor: Editor) {
   return () => {
@@ -229,5 +230,5 @@ export function leftIndent(editor: Editor) {
     if (focusedLine) {
       focusedLine.deleteText(Math.min(focusedLine.getIndent().length, editor.config.tabSize), 0);
     }
-  }
+  };
 }

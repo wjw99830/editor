@@ -1,6 +1,6 @@
-import { Editor } from "./editor";
-import { Line } from "./line";
-import { tail } from "../util";
+import { Editor } from './editor';
+import { Line } from './line';
+import { tail } from '../util';
 
 export const Operation = {
   DELETE_TEXT: 'deleteText',
@@ -78,8 +78,8 @@ export class Stack {
         case Operation.INSERT_LINE: {
           const line = this._editor.lines.find(line => line.id === opt.newId);
           if (line) {
-            let shouldFocusId = opt.prevId || opt.nextId;
-            let shouldFocusLine = this._editor.lines.find(line => line.id === shouldFocusId);
+            const shouldFocusId = opt.prevId || opt.nextId;
+            const shouldFocusLine = this._editor.lines.find(line => line.id === shouldFocusId);
             shouldFocusLine && this._editor.focus(shouldFocusLine);
             this._editor.removeLine(line, false);
           }
@@ -91,5 +91,5 @@ export class Stack {
       this.ptr--;
     }
   }
-  redo = () => {}
+  redo = () => {};
 }

@@ -1,8 +1,8 @@
-import { EditorConfig } from "../types";
-import { Editor } from "./editor";
-import { h } from "../dom";
-import { Operation } from "./stack";
-import { microtask, deepClone, tail } from "../util";
+import { EditorConfig } from '../types';
+import { Editor } from './editor';
+import { h } from '../dom';
+import { Operation } from './stack';
+import { microtask, deepClone, tail } from '../util';
 
 const { min, max, round, abs, ceil } = Math;
 
@@ -97,7 +97,7 @@ export class Line {
       this.editor._stack.push({
         type: Operation.INSERT_TEXT,
         id: this.id,
-        text: text,
+        text,
         startIndex,
         cursorIndex: this.cursorIndex,
         selections: deepClone(this.selections),
@@ -147,7 +147,10 @@ export class Line {
       } else {
         this.elm.classList.remove('line--focused');
       }
-      this.elm.querySelector('.line--number')!.textContent = num.toString();
+      if (this.lineNumber !== num) {
+        this.elm.querySelector('.line--number')!.textContent = num.toString();
+        this.lineNumber = num;
+      }
       this.elm.querySelector('.line--content')!.textContent = this.text;
       let offsetLeft = 0;
       for (const char of this.text.slice(0, this.cursorIndex)) {
@@ -202,15 +205,15 @@ export class Line {
       if (lineNumber < anchorNumber && !this.setSelectionFromAnchor(max(focus, 0), this.text.length + 1)) {
         alt ?
           this.pushSelection([max(focus, 0), this.text.length + 1]) :
-          this.setSelections([[max(focus, 0), this.text.length + 1]])
+          this.setSelections([[max(focus, 0), this.text.length + 1]]);
       } else if (lineNumber === anchorNumber && !this.setSelectionFromAnchor(max(0, min(focus, anchor)), min(this.text.length, max(focus, anchor)))) {
         alt ?
           this.pushSelection([max(0, min(focus, anchor)), min(this.text.length, max(focus, anchor))]) :
-          this.setSelections([[max(0, min(focus, anchor)), min(this.text.length, max(focus, anchor))]])
+          this.setSelections([[max(0, min(focus, anchor)), min(this.text.length, max(focus, anchor))]]);
       } else if (lineNumber > anchorNumber && !this.setSelectionFromAnchor(0, min(focus, this.text.length))) {
         alt ?
           this.pushSelection([0, min(focus, this.text.length)]) :
-          this.setSelections([[0, min(focus, this.text.length)]])
+          this.setSelections([[0, min(focus, this.text.length)]]);
       }
     }
   }

@@ -1,4 +1,4 @@
-import { Empty, AnyFunction } from "../types";
+import { Empty, AnyFunction } from '../types';
 
 export const tail = <T>(arr: T[]): T | Empty => arr[arr.length - 1];
 export const safetyHTML = (html: string) => {

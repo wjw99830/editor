@@ -1,6 +1,6 @@
-export type Event = {
+export interface Event {
   type: string;
-};
+}
 export type EventHandler = (...args: any[]) => void;
 export class EventEmitter {
   private _listeners: Record<string, Set<EventHandler>> = {};
@@ -16,7 +16,7 @@ export class EventEmitter {
     const wrapper = (...args: any[]) => {
       handler.call(undefined, ...args);
       this.off(event, wrapper);
-    }
+    };
     this.on(event, wrapper);
     return this;
   }
@@ -40,7 +40,7 @@ export class EventEmitter {
         }
         break;
       }
-    };
+    }
     return this;
   }
 }

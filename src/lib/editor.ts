@@ -1,12 +1,12 @@
-import { h, $ } from "../dom";
-import { EditorConfig, Empty } from "../types";
-import { Line } from "./line";
-import { tail, microtask } from "../util";
-import { ShortcutsEmitter, isControlKeyPressed, isTextKey, KeyCodeMap, isControlKey } from "./shortcuts-emitter";
-import { snippet, autoCompleteValues, autoCompleteKeys } from "./snippet";
-import { downEnter, upEnter, rightIndent, leftIndent, leftMove, rightMove, upMove, downMove, tab, leftDelete, rightDelete } from "./shortcuts";
-import { EventEmitter } from "./event-emitter";
-import { Stack, Operation } from "./stack";
+import { h, $ } from '../dom';
+import { EditorConfig, Empty } from '../types';
+import { Line } from './line';
+import { tail, microtask } from '../util';
+import { ShortcutsEmitter, isControlKeyPressed, isTextKey, KeyCodeMap, isControlKey } from './shortcuts-emitter';
+import { snippet, autoCompleteValues, autoCompleteKeys } from './snippet';
+import { downEnter, upEnter, rightIndent, leftIndent, leftMove, rightMove, upMove, downMove, tab, leftDelete, rightDelete } from './shortcuts';
+import { EventEmitter } from './event-emitter';
+import { Stack, Operation } from './stack';
 
 const { min, max, round } = Math;
 let eid = 0;
@@ -58,7 +58,7 @@ export class Editor extends EventEmitter {
   appendLine(target: Line, newLine: Line | boolean = true, pushToStack = true) {
     const nextLine = this.lines[this.lines.indexOf(target) + 1];
     let _pushToStack = true;
-    let prevId: number | void = undefined;
+    let prevId: number | void;
     let newId: number;
     if (newLine instanceof Line) {
       newId = newLine.id;
@@ -170,7 +170,7 @@ export class Editor extends EventEmitter {
       let tailSelection;
       let nextLine: Line | Empty;
       let textLength;
-      // Recursively delete selected text for behind 
+      // Recursively delete selected text for behind
       while (line) {
         selectionsLengh = line.selections.length;
         textLength = line.text.length;
@@ -229,7 +229,7 @@ export class Editor extends EventEmitter {
       line.dispose();
     }
     this.lines = [];
-    const rows = text.split('\n');
+    const rows = text.replace(/\t/g, ' '.repeat(this.config.tabSize)).split('\n');
     l = rows.length;
     for (let i = 0; i < l; i++) {
       const row = rows[i];
@@ -317,7 +317,7 @@ export class Editor extends EventEmitter {
     this.shortcutsEmitter.on('ctrl + arrowup', upMove(this));
     this.shortcutsEmitter.on('arrowdown', downMove(this));
     this.shortcutsEmitter.on('ctrl + arrowdown', downMove(this));
-    
+
     this._onMounted();
   }
   private _onKeyDown = (e: KeyboardEvent) => {
@@ -367,7 +367,7 @@ export class Editor extends EventEmitter {
     this.userInput = target.value;
     target.value = '';
     const focusedLine = this.findFocusedLine();
-    if (!focusedLine) return;
+    if (!focusedLine) { return; }
     if (this.userInput.length === 1 && !this.userInput.includes('\n')) {
       const nextChar = focusedLine.text[focusedLine.cursorIndex];
       if (autoCompleteValues.includes(nextChar) && nextChar === this.userInput) {
@@ -411,7 +411,9 @@ export class Editor extends EventEmitter {
       const l = this.lines.length;
       for (let i = 0; i < l; i++) {
         const line = this.lines[i];
-        line.setSelections([]);
+        if (line.selections.length) {
+          line.setSelections([]);
+        }
       }
     }
   }
@@ -439,7 +441,7 @@ export class Editor extends EventEmitter {
             if (!line.setSelectionFromAnchor(anchorIndex, line.text.length + 1)) {
               alt ?
                 line.pushSelection([anchorIndex, line.text.length + 1]) :
-                line.setSelections([[anchorIndex, line.text.length + 1]])
+                line.setSelections([[anchorIndex, line.text.length + 1]]);
             }
           } else if (i === max(anchorNumber, focusedNumber) && focusedNumber !== i) {
             const originX = line.elm.getBoundingClientRect().left + 32;
@@ -447,7 +449,7 @@ export class Editor extends EventEmitter {
             if (!line.setSelectionFromAnchor(0, anchorIndex)) {
               alt ?
                 line.pushSelection([0, anchorIndex]) :
-                line.setSelections([[0, anchorIndex]])
+                line.setSelections([[0, anchorIndex]]);
             }
           }
         }
