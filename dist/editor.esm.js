@@ -124,7 +124,6 @@ var Stack = /** @class */ (function () {
                             line.setCursor(opt.cursorIndex);
                             line.setSelections(opt.selections);
                         }
-                        _this.ptr--;
                         break;
                     }
                     case Operation.DELETE_TEXT: {
@@ -134,7 +133,6 @@ var Stack = /** @class */ (function () {
                             line.setCursor(opt.cursorIndex);
                             line.setSelections(opt.selections);
                         }
-                        _this.ptr--;
                         break;
                     }
                     case Operation.CUT: {
@@ -147,9 +145,6 @@ var Stack = /** @class */ (function () {
                                 if (i === 0) {
                                     var selectionEnd = opt.startIndex + row.length;
                                     if (l > 1) {
-                                        // const newLine = new Line(this._editor);
-                                        // line.deleteText(opt.startIndex, line.text.length, false);
-                                        // this._editor.appendLine(line, newLine, false);
                                         selectionEnd++;
                                     }
                                     line.insertText(row, opt.startIndex, false);
@@ -172,7 +167,6 @@ var Stack = /** @class */ (function () {
                                 }
                             }
                         }
-                        _this.ptr--;
                         break;
                     }
                     case Operation.INSERT_LINE: {
@@ -183,11 +177,12 @@ var Stack = /** @class */ (function () {
                             shouldFocusLine && _this._editor.focus(shouldFocusLine);
                             _this._editor.removeLine(line, false);
                         }
-                        _this.ptr--;
                         break;
                     }
                     default: break;
                 }
+                _this._innerStack.splice(_this.ptr, 1);
+                _this.ptr--;
             }
         };
         this.redo = function () { };
@@ -434,7 +429,7 @@ var Line = /** @class */ (function () {
         }
         this._willUpdate = true;
         microtask(function () {
-            var e_1, _a, e_2, _b;
+            var e_1, _a, e_2, _b, e_3, _c;
             var num = _this.editor.lines.indexOf(_this) + 1;
             _this.lineNumber = num;
             _this.elm.setAttribute('data-line-number', num.toString());
@@ -446,23 +441,38 @@ var Line = /** @class */ (function () {
             }
             _this.elm.querySelector('.line--number').textContent = num.toString();
             _this.elm.querySelector('.line--content').textContent = _this.text;
-            _this.elm.querySelector('.line--cursor').style.left = _this.editor.charWidth * _this.cursorIndex + 32 + 'px';
-            var selectionsLength = _this.selections.length;
-            var charWidth = _this.editor.charWidth;
+            var offsetLeft = 0;
             try {
-                for (var _c = __values(__spread(_this.elm.children)), _d = _c.next(); !_d.done; _d = _c.next()) {
-                    var child = _d.value;
-                    if (child.classList.contains('line--selected')) {
-                        child.remove();
-                    }
+                for (var _d = __values(_this.text.slice(0, _this.cursorIndex)), _e = _d.next(); !_e.done; _e = _d.next()) {
+                    var char = _e.value;
+                    var code = char.charCodeAt(0);
+                    offsetLeft += code.toString(16).length > 2 ? _this.editor.twoBytesCharWidth : _this.editor.charWidth;
                 }
             }
             catch (e_1_1) { e_1 = { error: e_1_1 }; }
             finally {
                 try {
-                    if (_d && !_d.done && (_a = _c.return)) _a.call(_c);
+                    if (_e && !_e.done && (_a = _d.return)) _a.call(_d);
                 }
                 finally { if (e_1) throw e_1.error; }
+            }
+            _this.elm.querySelector('.line--cursor').style.left = offsetLeft + 30 + 'px';
+            var selectionsLength = _this.selections.length;
+            var charWidth = _this.editor.charWidth;
+            try {
+                for (var _f = __values(__spread(_this.elm.children)), _g = _f.next(); !_g.done; _g = _f.next()) {
+                    var child = _g.value;
+                    if (child.classList.contains('line--selected')) {
+                        child.remove();
+                    }
+                }
+            }
+            catch (e_2_1) { e_2 = { error: e_2_1 }; }
+            finally {
+                try {
+                    if (_g && !_g.done && (_b = _f.return)) _b.call(_f);
+                }
+                finally { if (e_2) throw e_2.error; }
             }
             for (var i = 0; i < selectionsLength; i++) {
                 var selection = _this.selections[i];
@@ -472,17 +482,17 @@ var Line = /** @class */ (function () {
                 _this.elm.appendChild(selected);
             }
             try {
-                for (var _e = __values(_this.editor._decorators), _f = _e.next(); !_f.done; _f = _e.next()) {
-                    var decorator = _f.value;
+                for (var _h = __values(_this.editor._decorators), _j = _h.next(); !_j.done; _j = _h.next()) {
+                    var decorator = _j.value;
                     decorator(_this.elm);
                 }
             }
-            catch (e_2_1) { e_2 = { error: e_2_1 }; }
+            catch (e_3_1) { e_3 = { error: e_3_1 }; }
             finally {
                 try {
-                    if (_f && !_f.done && (_b = _e.return)) _b.call(_e);
+                    if (_j && !_j.done && (_c = _h.return)) _c.call(_h);
                 }
-                finally { if (e_2) throw e_2.error; }
+                finally { if (e_3) throw e_3.error; }
             }
             _this._willUpdate = false;
         });
@@ -495,7 +505,7 @@ var Line = /** @class */ (function () {
     Line.prototype._createElm = function () {
         var line = h('div', undefined, { class: 'line', id: 'line-' + this.id.toString() });
         var number = h('span', undefined, { class: 'line--number' }, this.editor.lines.indexOf(this) + 1);
-        var content = h('pre', undefined, { class: 'line--content' });
+        var content = h('pre', undefined, { class: "line--content " + this.editorConfig.lang });
         var cursor = h('span', undefined, { class: 'line--cursor' });
         cursor.style.left = '30px';
         line.appendChild(number);
@@ -676,7 +686,7 @@ function upEnter(editor) {
     return function () {
         var focusedLine = editor.findFocusedLine();
         if (focusedLine) {
-            var prevLine = editor.findPrevLine(focusedLine);
+            var prevLine = focusedLine.prevLine;
             var line = new Line(editor);
             editor.prependLine(focusedLine, line);
             editor.focus(line);
@@ -715,41 +725,46 @@ function downEnter(editor) {
 function leftDelete(editor) {
     return function (e) {
         var focusedLine = editor.findFocusedLine();
-        if (focusedLine) {
-            if (focusedLine.isEmpty()) {
-                var prevLine = editor.findPrevLine(focusedLine);
-                if (prevLine) {
-                    editor.removeLine(focusedLine);
-                    editor.focus(prevLine);
-                }
+        var selectedText = editor.getSelectedText();
+        if (selectedText) {
+            editor.cut();
+        }
+        else if (!focusedLine) {
+            return;
+        }
+        else if (focusedLine.isEmpty()) {
+            var prevLine = focusedLine.prevLine;
+            if (prevLine) {
+                editor.removeLine(focusedLine);
+                editor.focus(prevLine);
             }
-            else if (focusedLine.cursorIndex > 0) {
-                if (e.ctrlKey) {
-                    var tokens = focusedLine.text.slice(0, focusedLine.cursorIndex).split('').filter(Boolean);
-                    var splitter = ' .+*&|/%?:;=\'"`,~-_(){}[]<>]/';
-                    var i = focusedLine.cursorIndex;
-                    while (!splitter.includes(tokens[i - 1]) && i >= 1) {
-                        i--;
-                    }
-                    if (!tokens.join('').trim()) {
-                        i = 0;
-                    }
-                    else if (i >= 1 && i === focusedLine.cursorIndex) {
-                        i--;
-                    }
-                    focusedLine.deleteText(focusedLine.cursorIndex, i);
+        }
+        else if (focusedLine.cursorIndex > 0) {
+            if (e.ctrlKey) {
+                var tokens = focusedLine.text.slice(0, focusedLine.cursorIndex).split('').filter(Boolean);
+                var splitter = ' .+*&|/%?:;=\'"`,~-_(){}[]<>]/';
+                var i = focusedLine.cursorIndex;
+                while (!splitter.includes(tokens[i - 1]) && i >= 1) {
+                    i--;
                 }
-                else {
-                    focusedLine.deleteText();
+                if (!tokens.join('').trim()) {
+                    i = 0;
                 }
+                else if (i >= 1 && i === focusedLine.cursorIndex) {
+                    i--;
+                }
+                focusedLine.deleteText(focusedLine.cursorIndex, i);
             }
             else {
-                var prevLine = editor.findPrevLine(focusedLine);
-                if (prevLine) {
-                    prevLine.insertText(focusedLine.text);
-                    editor.removeLine(focusedLine);
-                    editor.focus(prevLine);
-                }
+                focusedLine.deleteText();
+            }
+        }
+        else {
+            var prevLine = focusedLine.prevLine;
+            if (prevLine) {
+                prevLine.insertText(focusedLine.text);
+                editor.removeLine(focusedLine);
+                editor.focus(prevLine);
             }
         }
     };
@@ -757,16 +772,87 @@ function leftDelete(editor) {
 function rightDelete(editor) {
     return function (e) {
         var focusedLine = editor.findFocusedLine();
+        var selectedText = editor.getSelectedText();
+        if (selectedText) {
+            editor.cut();
+        }
+        else if (!focusedLine) {
+            return;
+        }
+        else if (focusedLine.text.length === focusedLine.cursorIndex) {
+            var nextLine = focusedLine.nextLine;
+            if (nextLine) {
+                focusedLine.insertText(nextLine.text);
+                editor.removeLine(nextLine);
+            }
+        }
+        else if (e.ctrlKey) {
+            var cursorIndex = focusedLine.cursorIndex;
+            var tokens = focusedLine.text.split('').filter(Boolean);
+            var splitter = ' .+*&|/%?:=\'"`,~-_(){}[]<>]/';
+            var i = cursorIndex;
+            while (!splitter.includes(tokens[i]) && i <= focusedLine.text.length) {
+                i++;
+            }
+            if (i === cursorIndex) {
+                i++;
+            }
+            focusedLine.deleteText(cursorIndex, i);
+        }
+        else {
+            var cursorIndex = focusedLine.cursorIndex;
+            focusedLine.deleteText(cursorIndex, cursorIndex + 1);
+        }
+    };
+}
+function leftMove(editor) {
+    return function (e) {
+        editor.clearSelections();
+        var focusedLine = editor.findFocusedLine();
         if (focusedLine) {
             var cursorIndex = focusedLine.cursorIndex;
-            if (focusedLine.isEmpty()) {
-                var prevLine = editor.findPrevLine(focusedLine);
+            if (cursorIndex > 0) {
+                if (e.ctrlKey) {
+                    var tokens = focusedLine.text.split('').filter(Boolean);
+                    var splitter = ' .+*&|/%?:=\'"`,~-_(){}[]<>]/';
+                    var i = cursorIndex;
+                    while (!splitter.includes(tokens[i - 1]) && i >= 1) {
+                        i--;
+                    }
+                    if (i === cursorIndex) {
+                        i--;
+                    }
+                    focusedLine.setCursor(i);
+                }
+                else {
+                    focusedLine.setCursor(focusedLine.cursorIndex - 1);
+                }
+            }
+            else {
+                var prevLine = focusedLine.prevLine;
                 if (prevLine) {
-                    editor.removeLine(focusedLine);
+                    focusedLine.setCursor(focusedLine.text.length);
                     editor.focus(prevLine);
                 }
             }
-            else if (cursorIndex > 0) {
+        }
+    };
+}
+function rightMove(editor) {
+    return function (e) {
+        editor.clearSelections();
+        var focusedLine = editor.findFocusedLine();
+        if (focusedLine) {
+            var cursorIndex = focusedLine.cursorIndex;
+            if (cursorIndex >= focusedLine.text.length) {
+                var nextLine = focusedLine.nextLine;
+                if (nextLine) {
+                    focusedLine.setCursor(focusedLine.text.length);
+                    nextLine.setCursor(0);
+                    editor.focus(nextLine);
+                }
+            }
+            else {
                 if (e.ctrlKey) {
                     var tokens = focusedLine.text.split('').filter(Boolean);
                     var splitter = ' .+*&|/%?:=\'"`,~-_(){}[]<>]/';
@@ -777,53 +863,10 @@ function rightDelete(editor) {
                     if (i === cursorIndex) {
                         i++;
                     }
-                    focusedLine.deleteText(cursorIndex, i);
+                    focusedLine.setCursor(i);
                 }
                 else {
-                    focusedLine.deleteText(cursorIndex, cursorIndex + 1);
-                }
-            }
-            else {
-                var prevLine = editor.findPrevLine(focusedLine);
-                if (prevLine) {
-                    prevLine.insertText(focusedLine.text);
-                    editor.removeLine(focusedLine);
-                    editor.focus(prevLine);
-                }
-            }
-        }
-    };
-}
-function leftMove(editor) {
-    return function () {
-        var focusedLine = editor.findFocusedLine();
-        if (focusedLine) {
-            var cursorIndex = focusedLine.cursorIndex;
-            if (cursorIndex > 0) {
-                focusedLine.setCursor(focusedLine.cursorIndex - 1);
-            }
-            else {
-                var prevLine = editor.findPrevLine(focusedLine);
-                if (prevLine) {
-                    focusedLine.setCursor(focusedLine.text.length);
-                    editor.focus(prevLine);
-                }
-            }
-        }
-    };
-}
-function rightMove(editor) {
-    return function () {
-        var focusedLine = editor.findFocusedLine();
-        if (focusedLine) {
-            var cursorIndex = focusedLine.cursorIndex;
-            focusedLine.setCursor(cursorIndex + 1);
-            if (cursorIndex >= focusedLine.text.length) {
-                var nextLine = editor.findNextLine(focusedLine);
-                if (nextLine) {
-                    focusedLine.setCursor(focusedLine.text.length);
-                    nextLine.setCursor(0);
-                    editor.focus(nextLine);
+                    focusedLine.setCursor(cursorIndex + 1);
                 }
             }
         }
@@ -834,7 +877,7 @@ function upMove(editor) {
         var focusedLine = editor.findFocusedLine();
         if (focusedLine) {
             var cursorIndex = focusedLine.cursorIndex;
-            var prevLine = editor.findPrevLine(focusedLine);
+            var prevLine = focusedLine.prevLine;
             if (prevLine) {
                 prevLine.setCursor(cursorIndex);
                 focusedLine.setCursor(focusedLine.text.length);
@@ -848,7 +891,7 @@ function downMove(editor) {
         var focusedLine = editor.findFocusedLine();
         if (focusedLine) {
             var cursorIndex = focusedLine.cursorIndex;
-            var nextLine = editor.findNextLine(focusedLine);
+            var nextLine = focusedLine.nextLine;
             if (nextLine) {
                 nextLine.setCursor(cursorIndex);
                 focusedLine.setCursor(focusedLine.text.length);
@@ -894,6 +937,7 @@ var Editor = /** @class */ (function (_super) {
         _this.lines = [];
         _this.userInput = '';
         _this.charWidth = 0;
+        _this.twoBytesCharWidth = 0;
         _this.shortcutsEmitter = new ShortcutsEmitter();
         _this.selecting = false;
         _this.selectionAnchor = {
@@ -901,6 +945,7 @@ var Editor = /** @class */ (function (_super) {
         };
         _this._decorators = new Set();
         _this._stack = new Stack(_this);
+        _this._isComposing = false;
         _this._id = ++eid;
         _this.focus = function (line, e) {
             _this.currentLine = line;
@@ -915,9 +960,23 @@ var Editor = /** @class */ (function (_super) {
             }
             line.focus(e);
         };
+        _this.cut = function (pushToStack) {
+            if (pushToStack === void 0) { pushToStack = true; }
+            var startLine = _this.lines.find(function (line) { return line.selections.length; });
+            var startIndex = startLine ? startLine.cursorIndex : 0;
+            var selectedText = _this.deleteSelectedText();
+            if (startLine && pushToStack) {
+                _this._stack.push({
+                    type: Operation.CUT,
+                    id: startLine.id,
+                    startIndex: startIndex,
+                    text: selectedText,
+                });
+            }
+        };
         _this._onKeyDown = function (e) {
             var focusedLine = _this.findFocusedLine();
-            if (!focusedLine) {
+            if (!focusedLine || _this._isComposing) {
                 return;
             }
             if (isControlKeyPressed(e) || !isTextKey(e.keyCode)) {
@@ -948,45 +1007,51 @@ var Editor = /** @class */ (function (_super) {
             _this.currentLine = undefined;
         };
         _this._onInput = function (e) {
+            var target = e.target;
             // @ts-ignore
-            if (e.isComposing || e.inputType !== 'insertText' && e.inputType !== 'insertFromPaste') {
+            if (e.isComposing || e.inputType && e.inputType !== 'insertText' && e.inputType !== 'insertFromPaste') {
+                // @ts-ignore
+                _this._isComposing = !!e.isComposing;
+                if (!_this._isComposing) {
+                    target.value = '';
+                }
                 return;
             }
-            var target = e.target;
+            _this._isComposing = false;
             _this.userInput = target.value;
             target.value = '';
             var focusedLine = _this.findFocusedLine();
-            if (focusedLine) {
-                if (_this.userInput.length === 1 && !_this.userInput.includes('\n')) {
-                    var nextChar = focusedLine.text[focusedLine.cursorIndex];
-                    if (autoCompleteValues.includes(nextChar) && nextChar === _this.userInput) {
-                        focusedLine.setCursor(focusedLine.cursorIndex + 1);
+            if (!focusedLine)
+                return;
+            if (_this.userInput.length === 1 && !_this.userInput.includes('\n')) {
+                var nextChar = focusedLine.text[focusedLine.cursorIndex];
+                if (autoCompleteValues.includes(nextChar) && nextChar === _this.userInput) {
+                    focusedLine.setCursor(focusedLine.cursorIndex + 1);
+                }
+                else {
+                    focusedLine.insertText(snippet(_this.userInput));
+                    if (autoCompleteKeys.includes(_this.userInput)) {
+                        focusedLine.setCursor(focusedLine.cursorIndex - 1);
+                    }
+                }
+            }
+            else if (!_this.userInput.includes('\n') && _this.userInput.length > 1) {
+                focusedLine.insertText(_this.userInput);
+            }
+            else if (_this.userInput.includes('\n') && _this.userInput.trim().length > 1) {
+                var focusedIndex = _this.lines.indexOf(focusedLine);
+                var rows = _this.userInput.split('\n').filter(Boolean);
+                var l = rows.length;
+                for (var i = l - 1; i >= 0; i--) {
+                    var row = rows[i];
+                    if (i === 0) {
+                        focusedLine.insertText(row);
                     }
                     else {
-                        focusedLine.insertText(snippet(_this.userInput));
-                        if (autoCompleteKeys.includes(_this.userInput)) {
-                            focusedLine.setCursor(focusedLine.cursorIndex - 1);
-                        }
+                        _this.appendLine(focusedLine, new Line(_this).setText(row));
                     }
                 }
-                else if (!_this.userInput.includes('\n') && _this.userInput.length > 1) {
-                    focusedLine.insertText(_this.userInput);
-                }
-                else if (_this.userInput.includes('\n') && _this.userInput.trim().length > 1) {
-                    var focusedIndex = _this.lines.indexOf(focusedLine);
-                    var rows = _this.userInput.split('\n').filter(Boolean);
-                    var l = rows.length;
-                    for (var i = l - 1; i >= 0; i--) {
-                        var row = rows[i];
-                        if (i === 0) {
-                            focusedLine.insertText(row);
-                        }
-                        else {
-                            _this.appendLine(focusedLine, new Line(_this).setText(row));
-                        }
-                    }
-                    _this.focus(_this.lines[focusedIndex + l - 1]);
-                }
+                _this.focus(_this.lines[focusedIndex + l - 1]);
             }
         };
         _this._startSelect = function (e) {
@@ -1058,66 +1123,12 @@ var Editor = /** @class */ (function (_super) {
             _this.selecting = false;
             var textarea = _this.elm.querySelector('textarea');
             if (textarea) {
-                textarea.value = _this._getSelectedText();
+                textarea.value = _this.getSelectedText();
                 textarea.select();
             }
         };
-        _this._cut = function () {
-            var selectedText = _this._getSelectedText();
-            var startIndex = 0;
-            var startLine = null;
-            for (var i = 0; i < _this.lines.length; i++) {
-                var line = _this.lines[i];
-                if (!line.selections.length) {
-                    continue;
-                }
-                startLine = line;
-                startIndex = line.selections[0][0];
-                var selectionsLengh = void 0;
-                var tailSelection = void 0;
-                var nextLine = void 0;
-                var textLength = void 0;
-                // Recursively delete selected text for behind 
-                while (line) {
-                    selectionsLengh = line.selections.length;
-                    textLength = line.text.length;
-                    for (var j = 0; j < selectionsLengh; j++) {
-                        var selection = line.selections[j];
-                        line.deleteText(selection[0], selection[1], false);
-                        line.setCursor(selection[0]);
-                    }
-                    tailSelection = tail(line.selections);
-                    nextLine = line.nextLine;
-                    if (_this.lines[i] !== line) {
-                        var prevLine = line.prevLine;
-                        if (prevLine) {
-                            var startIndex_1 = prevLine.text.length;
-                            prevLine.insertText(line.text, startIndex_1, false);
-                            prevLine.setCursor(startIndex_1);
-                        }
-                        _this.removeLine(line);
-                    }
-                    if (tailSelection && tailSelection[1] === textLength + 1) {
-                        line.setSelections([]);
-                        line = nextLine;
-                    }
-                    else {
-                        line.setSelections([]);
-                        line = null;
-                    }
-                }
-                _this.focus(_this.lines[i]);
-            }
-            if (startLine) {
-                _this._stack.push({
-                    type: Operation.CUT,
-                    id: startLine.id,
-                    startIndex: startIndex,
-                    text: selectedText,
-                });
-            }
-        };
         config.tabSize = config.tabSize || 2;
+        config.lang = config.lang || 'javascript';
         _this.config = config;
         _this._mount();
         return _this;
@@ -1204,8 +1215,12 @@ var Editor = /** @class */ (function (_super) {
         var index = this.lines.indexOf(target);
         var prevLine = this.lines[index - 1];
         var nextLine = this.lines[index + 1];
-        prevLine.nextLine = nextLine;
-        nextLine.prevLine = prevLine;
+        if (prevLine) {
+            prevLine.nextLine = nextLine;
+        }
+        if (nextLine) {
+            nextLine.prevLine = prevLine;
+        }
         this.lines.splice(index, 1);
         if (pushToStack) {
             this._stack.push({
@@ -1215,6 +1230,69 @@ var Editor = /** @class */ (function (_super) {
         }
         target.dispose();
         return this;
+    };
+    Editor.prototype.getSelectedText = function () {
+        var text = [];
+        var l = this.lines.length;
+        for (var i = 0; i < l; i++) {
+            var line = this.lines[i];
+            for (var j = 0; j < line.selections.length; j++) {
+                var selection = line.selections[j];
+                text.push((line.text || '').slice(selection[0], selection[1]));
+            }
+        }
+        return text.join('\n');
+    };
+    Editor.prototype.deleteSelectedText = function () {
+        var selectedText = this.getSelectedText();
+        for (var i = 0; i < this.lines.length; i++) {
+            var line = this.lines[i];
+            if (!line.selections.length) {
+                continue;
+            }
+            var selectionsLengh = void 0;
+            var tailSelection = void 0;
+            var nextLine = void 0;
+            var textLength = void 0;
+            // Recursively delete selected text for behind 
+            while (line) {
+                selectionsLengh = line.selections.length;
+                textLength = line.text.length;
+                for (var j = 0; j < selectionsLengh; j++) {
+                    var selection = line.selections[j];
+                    line.deleteText(selection[0], selection[1], false);
+                    line.setCursor(selection[0]);
+                }
+                tailSelection = tail(line.selections);
+                nextLine = line.nextLine;
+                if (this.lines[i] !== line) {
+                    var prevLine = line.prevLine;
+                    if (prevLine) {
+                        var startIndex = prevLine.text.length;
+                        prevLine.insertText(line.text, startIndex, false);
+                        prevLine.setCursor(startIndex);
+                    }
+                    this.removeLine(line);
+                }
+                if (tailSelection && tailSelection[1] === textLength + 1) {
+                    line.setSelections([]);
+                    line = nextLine;
+                }
+                else {
+                    line.setSelections([]);
+                    line = null;
+                }
+            }
+            this.focus(this.lines[i]);
+        }
+        return selectedText;
+    };
+    Editor.prototype.clearSelections = function () {
+        var l = this.lines.length;
+        for (var i = 0; i < l; i++) {
+            var line = this.lines[i];
+            line.setSelections([]);
+        }
     };
     Editor.prototype.deserialize = function (text) {
         var l = this.lines.length;
@@ -1228,6 +1306,10 @@ var Editor = /** @class */ (function (_super) {
         for (var i = 0; i < l; i++) {
             var row = rows[i];
             this.appendLine(new Line(this).setText(row), false);
+        }
+        var tailLine = tail(this.lines);
+        if (tailLine) {
+            this.focus(tailLine);
         }
     };
     Editor.prototype.serialize = function () {
@@ -1263,11 +1345,9 @@ var Editor = /** @class */ (function (_super) {
         var _this = this;
         var editor = h('div', undefined, { class: 'editor', id: 'editor-' + this._id });
         this._editorElm = editor;
-        var linesFragment = document.createDocumentFragment();
         var line = new Line(this);
-        this.appendLine(line);
+        this.appendLine(line, false);
         var textarea = h('textarea');
-        editor.appendChild(linesFragment);
         editor.addEventListener('mousedown', function (e) {
             var target = e.target;
             if (target.classList.contains('editor')) {
@@ -1285,7 +1365,7 @@ var Editor = /** @class */ (function (_super) {
         textarea.addEventListener('input', this._onInput);
         textarea.addEventListener('compositionend', this._onInput);
         textarea.addEventListener('keydown', this._onKeyDown);
-        textarea.addEventListener('cut', this._cut);
+        textarea.addEventListener('cut', this.cut);
         this.elm.appendChild(editor);
         this.elm.appendChild(textarea);
         this.shortcutsEmitter.on('ctrl + s', function (e) {
@@ -1303,22 +1383,14 @@ var Editor = /** @class */ (function (_super) {
         this.shortcutsEmitter.on('ctrl + z', this._stack.undo);
         this.shortcutsEmitter.on('tab', tab(this));
         this.shortcutsEmitter.on('arrowleft', leftMove(this));
+        this.shortcutsEmitter.on('ctrl + arrowleft', leftMove(this));
         this.shortcutsEmitter.on('arrowright', rightMove(this));
+        this.shortcutsEmitter.on('ctrl + arrowright', rightMove(this));
         this.shortcutsEmitter.on('arrowup', upMove(this));
+        this.shortcutsEmitter.on('ctrl + arrowup', upMove(this));
         this.shortcutsEmitter.on('arrowdown', downMove(this));
+        this.shortcutsEmitter.on('ctrl + arrowdown', downMove(this));
         this._onMounted();
-    };
-    Editor.prototype._getSelectedText = function () {
-        var text = [];
-        var l = this.lines.length;
-        for (var i = 0; i < l; i++) {
-            var line = this.lines[i];
-            for (var j = 0; j < line.selections.length; j++) {
-                var selection = line.selections[j];
-                text.push((line.text || '').slice(selection[0], selection[1]));
-            }
-        }
-        return text.join('\n');
     };
     Editor.prototype._onMounted = function () {
         this.focus(this.lines[0]);
@@ -1336,10 +1408,14 @@ var Editor = /** @class */ (function (_super) {
             if (selection) {
                 selection.addRange(range);
                 var rect = range.getBoundingClientRect();
+                this.charWidth = rect.width;
+                textNode.textContent = '中';
+                range.setStart(textNode, 0);
+                range.setEnd(textNode, 1);
+                this.twoBytesCharWidth = range.getBoundingClientRect().width;
                 selection.removeRange(range);
                 range.detach();
                 textNode.remove();
-                this.charWidth = rect.width;
             }
         }
     };

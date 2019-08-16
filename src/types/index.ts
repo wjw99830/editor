@@ -4,5 +4,6 @@ export type IndexSignature<V = any> = {
 };
 export type EditorConfig = {
   tabSize: number;
+  lang: string;
 };
 export type AnyFunction = (...args: any[]) => any;

@@ -15,6 +15,7 @@ export class Editor extends EventEmitter {
   public config!: EditorConfig;
   public userInput = '';
   public charWidth = 0;
+  public twoBytesCharWidth = 0;
   public shortcutsEmitter = new ShortcutsEmitter();
   public currentLine?: Line;
   public selecting = false;
@@ -23,6 +24,7 @@ export class Editor extends EventEmitter {
   };
   public _decorators: Set<Decorator> = new Set();
   public _stack: Stack = new Stack(this);
+  public _isComposing = false;
   private _id = ++eid;
   private _editorElm!: HTMLElement;
 
@@ -32,6 +34,7 @@ export class Editor extends EventEmitter {
   ) {
     super();
     config.tabSize = config.tabSize || 2;
+    config.lang = config.lang || 'javascript';
     this.config = config as EditorConfig;
     this._mount();
   }
@@ -115,8 +118,12 @@ export class Editor extends EventEmitter {
     const index = this.lines.indexOf(target);
     const prevLine = this.lines[index - 1];
     const nextLine = this.lines[index + 1];
-    prevLine.nextLine = nextLine;
-    nextLine.prevLine = prevLine;
+    if (prevLine) {
+      prevLine.nextLine = nextLine;
+    }
+    if (nextLine) {
+      nextLine.prevLine = prevLine;
+    }
     this.lines.splice(index, 1);
     if (pushToStack) {
       this._stack.push({
@@ -140,6 +147,81 @@ export class Editor extends EventEmitter {
     }
     line.focus(e);
   }
+  getSelectedText() {
+    const text: string[] = [];
+    const l = this.lines.length;
+    for (let i = 0; i < l; i++) {
+      const line = this.lines[i];
+      for (let j = 0; j < line.selections.length; j++) {
+        const selection = line.selections[j];
+        text.push((line.text || '').slice(selection[0], selection[1]));
+      }
+    }
+    return text.join('\n');
+  }
+  deleteSelectedText() {
+    const selectedText = this.getSelectedText();
+    for (let i = 0; i < this.lines.length; i++) {
+      let line: Line | Empty = this.lines[i];
+      if (!line.selections.length) {
+        continue;
+      }
+      let selectionsLengh;
+      let tailSelection;
+      let nextLine: Line | Empty;
+      let textLength;
+      // Recursively delete selected text for behind 
+      while (line) {
+        selectionsLengh = line.selections.length;
+        textLength = line.text.length;
+        for (let j = 0; j < selectionsLengh; j++) {
+          const selection = line.selections[j];
+          line.deleteText(selection[0], selection[1], false);
+          line.setCursor(selection[0]);
+        }
+        tailSelection = tail(line.selections);
+        nextLine = line.nextLine;
+        if (this.lines[i] !== line) {
+          const prevLine = line.prevLine;
+          if (prevLine) {
+            const startIndex = prevLine.text.length;
+            prevLine.insertText(line.text, startIndex, false);
+            prevLine.setCursor(startIndex);
+          }
+          this.removeLine(line);
+        }
+        if (tailSelection && tailSelection[1] === textLength + 1) {
+          line.setSelections([]);
+          line = nextLine;
+        } else {
+          line.setSelections([]);
+          line = null;
+        }
+      }
+      this.focus(this.lines[i]);
+    }
+    return selectedText;
+  }
+  clearSelections() {
+    const l = this.lines.length;
+    for (let i = 0; i < l; i++) {
+      const line = this.lines[i];
+      line.setSelections([]);
+    }
+  }
+  cut = (pushToStack: Event | boolean = true) => {
+    const startLine = this.lines.find(line => line.selections.length);
+    const startIndex = startLine ? startLine.cursorIndex : 0;
+    const selectedText = this.deleteSelectedText();
+    if (startLine && pushToStack) {
+      this._stack.push({
+        type: Operation.CUT,
+        id: startLine.id,
+        startIndex,
+        text: selectedText,
+      });
+    }
+  }
   deserialize(text: string) {
     let l = this.lines.length;
     for (let i = 0; i < l; i++) {
@@ -152,6 +234,10 @@ export class Editor extends EventEmitter {
     for (let i = 0; i < l; i++) {
       const row = rows[i];
       this.appendLine(new Line(this).setText(row), false);
+    }
+    const tailLine = tail(this.lines);
+    if (tailLine) {
+      this.focus(tailLine);
     }
   }
   serialize() {
@@ -186,11 +272,9 @@ export class Editor extends EventEmitter {
   private _mount() {
     const editor = h('div', undefined, { class: 'editor', id: 'editor-' + this._id });
     this._editorElm = editor;
-    const linesFragment = document.createDocumentFragment();
     const line = new Line(this);
-    this.appendLine(line);
+    this.appendLine(line, false);
     const textarea = h('textarea');
-    editor.appendChild(linesFragment);
     editor.addEventListener('mousedown', (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       if (target.classList.contains('editor')) {
@@ -208,7 +292,7 @@ export class Editor extends EventEmitter {
     textarea.addEventListener('input', this._onInput);
     textarea.addEventListener('compositionend', this._onInput);
     textarea.addEventListener('keydown', this._onKeyDown);
-    textarea.addEventListener('cut', this._cut);
+    textarea.addEventListener('cut', this.cut);
     this.elm.appendChild(editor);
     this.elm.appendChild(textarea);
     this.shortcutsEmitter.on('ctrl + s', e => {
@@ -226,15 +310,19 @@ export class Editor extends EventEmitter {
     this.shortcutsEmitter.on('ctrl + z', this._stack.undo);
     this.shortcutsEmitter.on('tab', tab(this));
     this.shortcutsEmitter.on('arrowleft', leftMove(this));
+    this.shortcutsEmitter.on('ctrl + arrowleft', leftMove(this));
     this.shortcutsEmitter.on('arrowright', rightMove(this));
+    this.shortcutsEmitter.on('ctrl + arrowright', rightMove(this));
     this.shortcutsEmitter.on('arrowup', upMove(this));
+    this.shortcutsEmitter.on('ctrl + arrowup', upMove(this));
     this.shortcutsEmitter.on('arrowdown', downMove(this));
+    this.shortcutsEmitter.on('ctrl + arrowdown', downMove(this));
     
     this._onMounted();
   }
   private _onKeyDown = (e: KeyboardEvent) => {
     const focusedLine = this.findFocusedLine();
-    if (!focusedLine) {
+    if (!focusedLine || this._isComposing) {
       return;
     }
     if (isControlKeyPressed(e) || !isTextKey(e.keyCode)) {
@@ -265,41 +353,46 @@ export class Editor extends EventEmitter {
     this.currentLine = undefined;
   }
   private _onInput = (e: Event) => {
+    const target = e.target as HTMLTextAreaElement;
     // @ts-ignore
-    if (e.isComposing || e.inputType !== 'insertText' && e.inputType !== 'insertFromPaste') {
+    if (e.isComposing || e.inputType && e.inputType !== 'insertText' && e.inputType !== 'insertFromPaste') {
+      // @ts-ignore
+      this._isComposing = !!e.isComposing;
+      if (!this._isComposing) {
+        target.value = '';
+      }
       return;
     }
-    const target = e.target as HTMLTextAreaElement;
+    this._isComposing = false;
     this.userInput = target.value;
     target.value = '';
     const focusedLine = this.findFocusedLine();
-    if (focusedLine) {
-      if (this.userInput.length === 1 && !this.userInput.includes('\n')) {
-        const nextChar = focusedLine.text[focusedLine.cursorIndex];
-        if (autoCompleteValues.includes(nextChar) && nextChar === this.userInput) {
-          focusedLine.setCursor(focusedLine.cursorIndex + 1);
-        } else {
-          focusedLine.insertText(snippet(this.userInput));
-          if (autoCompleteKeys.includes(this.userInput)) {
-            focusedLine.setCursor(focusedLine.cursorIndex - 1);
-          }
+    if (!focusedLine) return;
+    if (this.userInput.length === 1 && !this.userInput.includes('\n')) {
+      const nextChar = focusedLine.text[focusedLine.cursorIndex];
+      if (autoCompleteValues.includes(nextChar) && nextChar === this.userInput) {
+        focusedLine.setCursor(focusedLine.cursorIndex + 1);
+      } else {
+        focusedLine.insertText(snippet(this.userInput));
+        if (autoCompleteKeys.includes(this.userInput)) {
+          focusedLine.setCursor(focusedLine.cursorIndex - 1);
         }
-      } else if (!this.userInput.includes('\n') && this.userInput.length > 1) {
-        focusedLine.insertText(this.userInput);
-      } else if (this.userInput.includes('\n') && this.userInput.trim().length > 1) {
-        const focusedIndex = this.lines.indexOf(focusedLine);
-        const rows = this.userInput.split('\n').filter(Boolean);
-        const l = rows.length;
-        for (let i = l - 1; i >= 0; i--) {
-          const row = rows[i];
-          if (i === 0) {
-            focusedLine.insertText(row);
-          } else {
-            this.appendLine(focusedLine, new Line(this).setText(row));
-          }
-        }
-        this.focus(this.lines[focusedIndex + l - 1]);
       }
+    } else if (!this.userInput.includes('\n') && this.userInput.length > 1) {
+      focusedLine.insertText(this.userInput);
+    } else if (this.userInput.includes('\n') && this.userInput.trim().length > 1) {
+      const focusedIndex = this.lines.indexOf(focusedLine);
+      const rows = this.userInput.split('\n').filter(Boolean);
+      const l = rows.length;
+      for (let i = l - 1; i >= 0; i--) {
+        const row = rows[i];
+        if (i === 0) {
+          focusedLine.insertText(row);
+        } else {
+          this.appendLine(focusedLine, new Line(this).setText(row));
+        }
+      }
+      this.focus(this.lines[focusedIndex + l - 1]);
     }
   }
   private _startSelect = (e: MouseEvent) => {
@@ -368,75 +461,9 @@ export class Editor extends EventEmitter {
     this.selecting = false;
     const textarea = this.elm.querySelector('textarea');
     if (textarea) {
-      textarea.value = this._getSelectedText();
+      textarea.value = this.getSelectedText();
       textarea.select();
     }
-  }
-  private _cut = () => {
-    const selectedText = this._getSelectedText();
-    let startIndex = 0;
-    let startLine: Line | Empty = null;
-    for (let i = 0; i < this.lines.length; i++) {
-      let line: Line | Empty = this.lines[i];
-      if (!line.selections.length) {
-        continue;
-      }
-      startLine = line;
-      startIndex = line.selections[0][0];
-      let selectionsLengh;
-      let tailSelection;
-      let nextLine: Line | Empty;
-      let textLength;
-      // Recursively delete selected text for behind 
-      while (line) {
-        selectionsLengh = line.selections.length;
-        textLength = line.text.length;
-        for (let j = 0; j < selectionsLengh; j++) {
-          const selection = line.selections[j];
-          line.deleteText(selection[0], selection[1], false);
-          line.setCursor(selection[0]);
-        }
-        tailSelection = tail(line.selections);
-        nextLine = line.nextLine;
-        if (this.lines[i] !== line) {
-          const prevLine = line.prevLine;
-          if (prevLine) {
-            const startIndex = prevLine.text.length;
-            prevLine.insertText(line.text, startIndex, false);
-            prevLine.setCursor(startIndex);
-          }
-          this.removeLine(line);
-        }
-        if (tailSelection && tailSelection[1] === textLength + 1) {
-          line.setSelections([]);
-          line = nextLine;
-        } else {
-          line.setSelections([]);
-          line = null;
-        }
-      }
-      this.focus(this.lines[i]);
-    }
-    if (startLine) {
-      this._stack.push({
-        type: Operation.CUT,
-        id: startLine.id,
-        startIndex,
-        text: selectedText,
-      });
-    }
-  }
-  private _getSelectedText() {
-    const text: string[] = [];
-    const l = this.lines.length;
-    for (let i = 0; i < l; i++) {
-      const line = this.lines[i];
-      for (let j = 0; j < line.selections.length; j++) {
-        const selection = line.selections[j];
-        text.push((line.text || '').slice(selection[0], selection[1]));
-      }
-    }
-    return text.join('\n');
   }
   private _onMounted() {
     this.focus(this.lines[0]);
@@ -454,10 +481,14 @@ export class Editor extends EventEmitter {
       if (selection) {
         selection.addRange(range);
         const rect = range.getBoundingClientRect();
+        this.charWidth = rect.width;
+        textNode.textContent = '中';
+        range.setStart(textNode, 0);
+        range.setEnd(textNode, 1);
+        this.twoBytesCharWidth = range.getBoundingClientRect().width;
         selection.removeRange(range);
         range.detach();
         textNode.remove();
-        this.charWidth = rect.width;
       }
     }
   }

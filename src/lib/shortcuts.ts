@@ -7,7 +7,7 @@ export function upEnter(editor: Editor) {
   return () => {
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
-      const prevLine = editor.findPrevLine(focusedLine);
+      const prevLine = focusedLine.prevLine;
       const line = new Line(editor);
       editor.prependLine(focusedLine, line);
       editor.focus(line);
@@ -42,63 +42,43 @@ export function downEnter(editor: Editor) {
     }
   };
 }
-export function backspace(editor: Editor) {
-  return () => {
-    const focusedLine = editor.findFocusedLine();
-    if (focusedLine) {
-      if (focusedLine.isEmpty()) {
-        const prevLine = editor.findPrevLine(focusedLine);
-        if (prevLine) {
-          editor.removeLine(focusedLine);
-          editor.focus(prevLine);
-        }
-      } else if (focusedLine.cursorIndex > 0) {
-        focusedLine.deleteText();
-      } else {
-        const prevLine = editor.findPrevLine(focusedLine);
-        if (prevLine) {
-          prevLine.insertText(focusedLine.text);
-          editor.removeLine(focusedLine);
-          editor.focus(prevLine);
-        }
-      }
-    }
-  };
-}
 export function leftDelete(editor: Editor) {
   return (e: KeyboardEvent) => {
     const focusedLine = editor.findFocusedLine();
-    if (focusedLine) {
-      if (focusedLine.isEmpty()) {
-        const prevLine = editor.findPrevLine(focusedLine);
-        if (prevLine) {
-          editor.removeLine(focusedLine);
-          editor.focus(prevLine);
+    const selectedText = editor.getSelectedText();
+    if (selectedText) {
+      editor.cut();
+    } else if (!focusedLine) {
+      return;
+    } else if (focusedLine.isEmpty()) {
+      const prevLine = focusedLine.prevLine;
+      if (prevLine) {
+        editor.removeLine(focusedLine);
+        editor.focus(prevLine);
+      }
+    } else if (focusedLine.cursorIndex > 0) {
+      if (e.ctrlKey) {
+        const tokens = focusedLine.text.slice(0, focusedLine.cursorIndex).split('').filter(Boolean);
+        const splitter = ' .+*&|/%?:;=\'"`,~-_(){}[]<>]/';
+        let i = focusedLine.cursorIndex;
+        while (!splitter.includes(tokens[i - 1]) && i >= 1) {
+          i--;
         }
-      } else if (focusedLine.cursorIndex > 0) {
-        if (e.ctrlKey) {
-          const tokens = focusedLine.text.slice(0, focusedLine.cursorIndex).split('').filter(Boolean);
-          const splitter = ' .+*&|/%?:;=\'"`,~-_(){}[]<>]/';
-          let i = focusedLine.cursorIndex;
-          while (!splitter.includes(tokens[i - 1]) && i >= 1) {
-            i--;
-          }
-          if (!tokens.join('').trim()) {
-            i = 0;
-          } else if (i >= 1 && i === focusedLine.cursorIndex) {
-            i--;
-          }
-          focusedLine.deleteText(focusedLine.cursorIndex, i);
-        } else {
-          focusedLine.deleteText();
+        if (!tokens.join('').trim()) {
+          i = 0;
+        } else if (i >= 1 && i === focusedLine.cursorIndex) {
+          i--;
         }
+        focusedLine.deleteText(focusedLine.cursorIndex, i);
       } else {
-        const prevLine = editor.findPrevLine(focusedLine);
-        if (prevLine) {
-          prevLine.insertText(focusedLine.text);
-          editor.removeLine(focusedLine);
-          editor.focus(prevLine);
-        }
+        focusedLine.deleteText();
+      }
+    } else {
+      const prevLine = focusedLine.prevLine;
+      if (prevLine) {
+        prevLine.insertText(focusedLine.text);
+        editor.removeLine(focusedLine);
+        editor.focus(prevLine);
       }
     }
   };
@@ -106,15 +86,80 @@ export function leftDelete(editor: Editor) {
 export function rightDelete(editor: Editor) {
   return (e: KeyboardEvent) => {
     const focusedLine = editor.findFocusedLine();
+    const selectedText = editor.getSelectedText();
+    if (selectedText) {
+      editor.cut();
+    } else if (!focusedLine) {
+      return;
+    } else if (focusedLine.text.length === focusedLine.cursorIndex) {
+      const { nextLine } = focusedLine;
+      if (nextLine) {
+        focusedLine.insertText(nextLine.text);
+        editor.removeLine(nextLine);
+      }
+    } else if (e.ctrlKey) {
+      const { cursorIndex } = focusedLine;
+      const tokens = focusedLine.text.split('').filter(Boolean);
+      const splitter = ' .+*&|/%?:=\'"`,~-_(){}[]<>]/';
+      let i = cursorIndex;
+      while (!splitter.includes(tokens[i]) && i <= focusedLine.text.length) {
+        i++;
+      }
+      if (i === cursorIndex) {
+        i++;
+      }
+      focusedLine.deleteText(cursorIndex, i);
+    } else {
+      const { cursorIndex } = focusedLine;
+      focusedLine.deleteText(cursorIndex, cursorIndex + 1);
+    }
+  };
+}
+export function leftMove(editor: Editor) {
+  return (e: KeyboardEvent) => {
+    editor.clearSelections();
+    const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
       const cursorIndex = focusedLine.cursorIndex;
-      if (focusedLine.isEmpty()) {
-        const prevLine = editor.findPrevLine(focusedLine);
+      if (cursorIndex > 0) {
+        if (e.ctrlKey) {
+          const tokens = focusedLine.text.split('').filter(Boolean);
+          const splitter = ' .+*&|/%?:=\'"`,~-_(){}[]<>]/';
+          let i = cursorIndex;
+          while (!splitter.includes(tokens[i - 1]) && i >= 1) {
+            i--;
+          }
+          if (i === cursorIndex) {
+            i--;
+          }
+          focusedLine.setCursor(i);
+        } else {
+          focusedLine.setCursor(focusedLine.cursorIndex - 1);
+        }
+      } else {
+        const prevLine = focusedLine.prevLine;
         if (prevLine) {
-          editor.removeLine(focusedLine);
+          focusedLine.setCursor(focusedLine.text.length);
           editor.focus(prevLine);
         }
-      } else if (cursorIndex > 0) {
+      }
+    }
+  };
+}
+export function rightMove(editor: Editor) {
+  return (e: KeyboardEvent) => {
+    editor.clearSelections();
+    const focusedLine = editor.findFocusedLine();
+    if (focusedLine) {
+      const cursorIndex = focusedLine.cursorIndex;
+      if (cursorIndex >= focusedLine.text.length) {
+        const nextLine = focusedLine.nextLine;
+        if (nextLine) {
+          focusedLine.setCursor(focusedLine.text.length);
+          nextLine.setCursor(0);
+          editor.focus(nextLine);
+        }
+      } else {
         if (e.ctrlKey) {
           const tokens = focusedLine.text.split('').filter(Boolean);
           const splitter = ' .+*&|/%?:=\'"`,~-_(){}[]<>]/';
@@ -125,50 +170,9 @@ export function rightDelete(editor: Editor) {
           if (i === cursorIndex) {
             i++;
           }
-          focusedLine.deleteText(cursorIndex, i);
+          focusedLine.setCursor(i);
         } else {
-          focusedLine.deleteText(cursorIndex, cursorIndex + 1);
-        }
-      } else {
-        const prevLine = editor.findPrevLine(focusedLine);
-        if (prevLine) {
-          prevLine.insertText(focusedLine.text);
-          editor.removeLine(focusedLine);
-          editor.focus(prevLine);
-        }
-      }
-    }
-  };
-}
-export function leftMove(editor: Editor) {
-  return () => {
-    const focusedLine = editor.findFocusedLine();
-    if (focusedLine) {
-      const cursorIndex = focusedLine.cursorIndex;
-      if (cursorIndex > 0) {
-        focusedLine.setCursor(focusedLine.cursorIndex - 1);
-      } else {
-        const prevLine = editor.findPrevLine(focusedLine);
-        if (prevLine) {
-          focusedLine.setCursor(focusedLine.text.length);
-          editor.focus(prevLine);
-        }
-      }
-    }
-  };
-}
-export function rightMove(editor: Editor) {
-  return () => {
-    const focusedLine = editor.findFocusedLine();
-    if (focusedLine) {
-      const cursorIndex = focusedLine.cursorIndex;
-      focusedLine.setCursor(cursorIndex + 1);
-      if (cursorIndex >= focusedLine.text.length) {
-        const nextLine = editor.findNextLine(focusedLine);
-        if (nextLine) {
-          focusedLine.setCursor(focusedLine.text.length);
-          nextLine.setCursor(0);
-          editor.focus(nextLine);
+          focusedLine.setCursor(cursorIndex + 1);
         }
       }
     }
@@ -179,7 +183,7 @@ export function upMove(editor: Editor) {
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
       const cursorIndex = focusedLine.cursorIndex;
-      const prevLine = editor.findPrevLine(focusedLine);
+      const prevLine = focusedLine.prevLine;
       if (prevLine) {
         prevLine.setCursor(cursorIndex);
         focusedLine.setCursor(focusedLine.text.length);
@@ -193,7 +197,7 @@ export function downMove(editor: Editor) {
     const focusedLine = editor.findFocusedLine();
     if (focusedLine) {
       const cursorIndex = focusedLine.cursorIndex;
-      const nextLine = editor.findNextLine(focusedLine);
+      const nextLine = focusedLine.nextLine;
       if (nextLine) {
         nextLine.setCursor(cursorIndex);
         focusedLine.setCursor(focusedLine.text.length);

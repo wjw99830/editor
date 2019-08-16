@@ -4,7 +4,7 @@ import { h } from "../dom";
 import { Operation } from "./stack";
 import { microtask, deepClone, tail } from "../util";
 
-const { min, max, round, abs } = Math;
+const { min, max, round, abs, ceil } = Math;
 
 let lid = 0;
 export class Line {
@@ -149,7 +149,12 @@ export class Line {
       }
       this.elm.querySelector('.line--number')!.textContent = num.toString();
       this.elm.querySelector('.line--content')!.textContent = this.text;
-      (this.elm.querySelector('.line--cursor') as HTMLElement).style.left = this.editor.charWidth * this.cursorIndex + 32 + 'px';
+      let offsetLeft = 0;
+      for (const char of this.text.slice(0, this.cursorIndex)) {
+        const code = char.charCodeAt(0);
+        offsetLeft += code.toString(16).length > 2 ? this.editor.twoBytesCharWidth : this.editor.charWidth;
+      }
+      (this.elm.querySelector('.line--cursor') as HTMLElement).style.left = offsetLeft + 30 + 'px';
       const selectionsLength = this.selections.length;
       const charWidth = this.editor.charWidth;
       for (const child of [...this.elm.children]) {
@@ -212,7 +217,7 @@ export class Line {
   private _createElm() {
     const line = h('div', undefined, { class: 'line', id: 'line-' + this.id.toString() });
     const number = h('span', undefined, { class: 'line--number' }, this.editor.lines.indexOf(this) + 1);
-    const content = h('pre', undefined, { class: 'line--content' });
+    const content = h('pre', undefined, { class: `line--content ${this.editorConfig.lang}` });
     const cursor = h('span', undefined, { class: 'line--cursor' });
     cursor.style.left = '30px';
     line.appendChild(number);

@@ -22,14 +22,11 @@
   <script src="/dist/editor.umd.js"></script>
   <script>
     // for (let i = 0; i < 10000; i++) {
-      const editor = new Editor(document.querySelector('#editor')).useDecorator(elm => {
+      const editor = new Editor(document.querySelector('#editor')).useDecorator(function (elm) {
         hljs.highlightBlock(elm.querySelector('pre'));
       });
       editor.on('save', console.log);
-      editor.deserialize(`
-const add = (a, b) => a + b;
-console.log(add(1, 2));
-`);
+      editor.deserialize('\nconst add = (a, b) => a + b;\nconsole.log(add(1, 2));\n');
       // editor.dispose();
     // }
   </script>

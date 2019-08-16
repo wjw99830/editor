@@ -32,7 +32,6 @@ export class Stack {
             line.setCursor(opt.cursorIndex);
             line.setSelections(opt.selections);
           }
-          this.ptr--;
           break;
         }
         case Operation.DELETE_TEXT: {
@@ -42,7 +41,6 @@ export class Stack {
             line.setCursor(opt.cursorIndex);
             line.setSelections(opt.selections);
           }
-          this.ptr--;
           break;
         }
         case Operation.CUT: {
@@ -55,9 +53,6 @@ export class Stack {
               if (i === 0) {
                 let selectionEnd = opt.startIndex + row.length;
                 if (l > 1) {
-                  // const newLine = new Line(this._editor);
-                  // line.deleteText(opt.startIndex, line.text.length, false);
-                  // this._editor.appendLine(line, newLine, false);
                   selectionEnd++;
                 }
                 line.insertText(row, opt.startIndex, false);
@@ -78,7 +73,6 @@ export class Stack {
               }
             }
           }
-          this.ptr--;
           break;
         }
         case Operation.INSERT_LINE: {
@@ -89,11 +83,12 @@ export class Stack {
             shouldFocusLine && this._editor.focus(shouldFocusLine);
             this._editor.removeLine(line, false);
           }
-          this.ptr--;
           break;
         }
         default: break;
       }
+      this._innerStack.splice(this.ptr, 1);
+      this.ptr--;
     }
   }
   redo = () => {}
